@@ -46,7 +46,7 @@ proton-cli list --json --limit 5
 
 ## MSRV
 
-The minimum supported Rust version is **1.85.0** (edition 2024).
+The minimum supported Rust version is **1.90.0** (edition 2024).
 
 ## License
 
