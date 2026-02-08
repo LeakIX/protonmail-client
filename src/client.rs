@@ -13,8 +13,7 @@ use tokio_rustls::TlsConnector;
 use tokio_util::compat::{Compat, TokioAsyncReadCompatExt};
 use tracing::{debug, info, warn};
 
-type ImapSession =
-    Session<Compat<tokio_rustls::client::TlsStream<TcpStream>>>;
+type ImapSession = Session<Compat<tokio_rustls::client::TlsStream<TcpStream>>>;
 
 /// Read-only IMAP client for Proton Mail via Proton Bridge
 pub struct ProtonClient {
@@ -34,9 +33,7 @@ impl ProtonClient {
         let mut folder_stream = session
             .list(Some(""), Some("*"))
             .await
-            .map_err(|e| {
-                Error::Imap(format!("List folders failed: {e}"))
-            })?;
+            .map_err(|e| Error::Imap(format!("List folders failed: {e}")))?;
 
         let mut names = Vec::new();
         while let Some(item) = folder_stream.next().await {
@@ -51,11 +48,7 @@ impl ProtonClient {
     }
 
     /// Fetch a single email by UID from a folder
-    pub async fn fetch_uid(
-        &self,
-        folder: &str,
-        uid: u32,
-    ) -> Result<Email> {
+    pub async fn fetch_uid(&self, folder: &str, uid: u32) -> Result<Email> {
         let mut session = self.connect().await?;
         self.select(&mut session, folder).await?;
 
@@ -66,27 +59,17 @@ impl ProtonClient {
     }
 
     /// Fetch all unseen emails from a folder
-    pub async fn fetch_unseen(
-        &self,
-        folder: &str,
-    ) -> Result<Vec<Email>> {
+    pub async fn fetch_unseen(&self, folder: &str) -> Result<Vec<Email>> {
         self.search(folder, "UNSEEN").await
     }
 
     /// Fetch all emails from a folder
-    pub async fn fetch_all(
-        &self,
-        folder: &str,
-    ) -> Result<Vec<Email>> {
+    pub async fn fetch_all(&self, folder: &str) -> Result<Vec<Email>> {
         self.search(folder, "ALL").await
     }
 
     /// Fetch the N most recent emails from a folder
-    pub async fn fetch_last_n(
-        &self,
-        folder: &str,
-        n: usize,
-    ) -> Result<Vec<Email>> {
+    pub async fn fetch_last_n(&self, folder: &str, n: usize) -> Result<Vec<Email>> {
         let mut session = self.connect().await?;
         self.select(&mut session, folder).await?;
 
@@ -108,8 +91,7 @@ impl ProtonClient {
 
         info!("Fetching {} most recent messages", recent_uids.len());
 
-        let mut emails =
-            self.fetch_by_uids(&mut session, recent_uids).await?;
+        let mut emails = self.fetch_by_uids(&mut session, recent_uids).await?;
         emails.sort_by(|a, b| b.date.cmp(&a.date));
 
         session.logout().await.ok();
@@ -127,8 +109,7 @@ impl ProtonClient {
     ) -> Result<Vec<Email>> {
         let since_str = since.format("%-d-%b-%Y").to_string();
         let before_str = before.format("%-d-%b-%Y").to_string();
-        let query =
-            format!("SINCE {since_str} BEFORE {before_str}");
+        let query = format!("SINCE {since_str} BEFORE {before_str}");
 
         let mut emails = self.search(folder, &query).await?;
         emails.sort_by(|a, b| b.date.cmp(&a.date));
@@ -136,11 +117,7 @@ impl ProtonClient {
     }
 
     /// Search emails using an arbitrary IMAP search query
-    pub async fn search(
-        &self,
-        folder: &str,
-        query: &str,
-    ) -> Result<Vec<Email>> {
+    pub async fn search(&self, folder: &str, query: &str) -> Result<Vec<Email>> {
         let mut session = self.connect().await?;
         self.select(&mut session, folder).await?;
 
@@ -155,14 +132,9 @@ impl ProtonClient {
             return Ok(vec![]);
         }
 
-        info!(
-            "Found {} messages matching '{}'",
-            uid_list.len(),
-            query
-        );
+        info!("Found {} messages matching '{}'", uid_list.len(), query);
 
-        let emails =
-            self.fetch_by_uids(&mut session, &uid_list).await?;
+        let emails = self.fetch_by_uids(&mut session, &uid_list).await?;
 
         session.logout().await.ok();
         Ok(emails)
@@ -174,34 +146,26 @@ impl ProtonClient {
     fn tls_connector(&self) -> Result<TlsConnector> {
         let config = rustls::ClientConfig::builder()
             .dangerous()
-            .with_custom_certificate_verifier(Arc::new(
-                DangerousVerifier,
-            ))
+            .with_custom_certificate_verifier(Arc::new(DangerousVerifier))
             .with_no_client_auth();
         Ok(TlsConnector::from(Arc::new(config)))
     }
 
     async fn connect(&self) -> Result<ImapSession> {
-        let addr =
-            format!("{}:{}", self.config.host, self.config.port);
+        let addr = format!("{}:{}", self.config.host, self.config.port);
         debug!("Connecting to IMAP server at {}", addr);
 
         let tcp_stream = TcpStream::connect(&addr).await?;
-        let mut client =
-            async_imap::Client::new(tcp_stream.compat());
+        let mut client = async_imap::Client::new(tcp_stream.compat());
 
         client
             .run_command_and_check_ok("STARTTLS", None)
             .await
-            .map_err(|e| {
-                Error::Tls(format!("STARTTLS failed: {e}"))
-            })?;
+            .map_err(|e| Error::Tls(format!("STARTTLS failed: {e}")))?;
 
         let connector = self.tls_connector()?;
-        let server_name =
-            ServerName::try_from(self.config.host.clone()).map_err(
-                |e| Error::Tls(format!("Invalid server name: {e}")),
-            )?;
+        let server_name = ServerName::try_from(self.config.host.clone())
+            .map_err(|e| Error::Tls(format!("Invalid server name: {e}")))?;
 
         let inner = client.into_inner().into_inner();
         let tls_stream = connector
@@ -209,36 +173,26 @@ impl ProtonClient {
             .await
             .map_err(|e| Error::Tls(e.to_string()))?;
 
-        let tls_client =
-            async_imap::Client::new(tls_stream.compat());
+        let tls_client = async_imap::Client::new(tls_stream.compat());
 
         let session = tls_client
             .login(&self.config.username, &self.config.password)
             .await
-            .map_err(|(e, _)| {
-                Error::Imap(format!("Login failed: {e}"))
-            })?;
+            .map_err(|(e, _)| Error::Imap(format!("Login failed: {e}")))?;
 
         info!("Connected to IMAP server");
         Ok(session)
     }
 
-    async fn select(
-        &self,
-        session: &mut ImapSession,
-        folder: &str,
-    ) -> Result<()> {
-        session.select(folder).await.map_err(|e| {
-            Error::Imap(format!("Failed to select {folder}: {e}"))
-        })?;
+    async fn select(&self, session: &mut ImapSession, folder: &str) -> Result<()> {
+        session
+            .select(folder)
+            .await
+            .map_err(|e| Error::Imap(format!("Failed to select {folder}: {e}")))?;
         Ok(())
     }
 
-    async fn fetch_by_uids(
-        &self,
-        session: &mut ImapSession,
-        uids: &[u32],
-    ) -> Result<Vec<Email>> {
+    async fn fetch_by_uids(&self, session: &mut ImapSession, uids: &[u32]) -> Result<Vec<Email>> {
         let mut emails = Vec::new();
 
         for uid in uids {
@@ -253,26 +207,17 @@ impl ProtonClient {
         Ok(emails)
     }
 
-    async fn fetch_single(
-        &self,
-        session: &mut ImapSession,
-        uid: u32,
-    ) -> Result<Email> {
+    async fn fetch_single(&self, session: &mut ImapSession, uid: u32) -> Result<Email> {
         let uid_set = format!("{uid}");
         let mut messages = session
             .uid_fetch(&uid_set, "(BODY.PEEK[])")
             .await
-            .map_err(|e| {
-                Error::Imap(format!("Fetch failed: {e}"))
-            })?;
+            .map_err(|e| Error::Imap(format!("Fetch failed: {e}")))?;
 
         if let Some(msg_result) = messages.next().await {
-            let msg = msg_result.map_err(|e| {
-                Error::Imap(format!("Fetch error: {e}"))
-            })?;
+            let msg = msg_result.map_err(|e| Error::Imap(format!("Fetch error: {e}")))?;
             if let Some(body) = msg.body() {
-                return parse_email(uid, body)
-                    .map_err(|e| Error::Parse(e.to_string()));
+                return parse_email(uid, body).map_err(|e| Error::Parse(e.to_string()));
             }
         }
 
@@ -293,10 +238,7 @@ impl rustls::client::danger::ServerCertVerifier for DangerousVerifier {
         _server_name: &rustls::pki_types::ServerName<'_>,
         _ocsp_response: &[u8],
         _now: rustls::pki_types::UnixTime,
-    ) -> std::result::Result<
-        rustls::client::danger::ServerCertVerified,
-        rustls::Error,
-    > {
+    ) -> std::result::Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
         Ok(rustls::client::danger::ServerCertVerified::assertion())
     }
 
@@ -305,13 +247,8 @@ impl rustls::client::danger::ServerCertVerifier for DangerousVerifier {
         _message: &[u8],
         _cert: &rustls::pki_types::CertificateDer<'_>,
         _dss: &rustls::DigitallySignedStruct,
-    ) -> std::result::Result<
-        rustls::client::danger::HandshakeSignatureValid,
-        rustls::Error,
-    > {
-        Ok(
-            rustls::client::danger::HandshakeSignatureValid::assertion(),
-        )
+    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
     }
 
     fn verify_tls13_signature(
@@ -319,18 +256,11 @@ impl rustls::client::danger::ServerCertVerifier for DangerousVerifier {
         _message: &[u8],
         _cert: &rustls::pki_types::CertificateDer<'_>,
         _dss: &rustls::DigitallySignedStruct,
-    ) -> std::result::Result<
-        rustls::client::danger::HandshakeSignatureValid,
-        rustls::Error,
-    > {
-        Ok(
-            rustls::client::danger::HandshakeSignatureValid::assertion(),
-        )
+    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
     }
 
-    fn supported_verify_schemes(
-        &self,
-    ) -> Vec<rustls::SignatureScheme> {
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
         vec![
             rustls::SignatureScheme::RSA_PKCS1_SHA256,
             rustls::SignatureScheme::RSA_PKCS1_SHA384,

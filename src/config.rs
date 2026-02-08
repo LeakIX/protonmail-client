@@ -26,20 +26,15 @@ impl ImapConfig {
         dotenvy::dotenv().ok();
 
         Ok(Self {
-            host: env::var("IMAP_HOST")
-                .unwrap_or_else(|_| "127.0.0.1".to_string()),
+            host: env::var("IMAP_HOST").unwrap_or_else(|_| "127.0.0.1".to_string()),
             port: env::var("IMAP_PORT")
                 .unwrap_or_else(|_| "1143".to_string())
                 .parse()
-                .map_err(|e| {
-                    Error::Config(format!("Invalid IMAP_PORT: {e}"))
-                })?,
-            username: env::var("IMAP_USERNAME").map_err(|_| {
-                Error::Config("IMAP_USERNAME not set".into())
-            })?,
-            password: env::var("IMAP_PASSWORD").map_err(|_| {
-                Error::Config("IMAP_PASSWORD not set".into())
-            })?,
+                .map_err(|e| Error::Config(format!("Invalid IMAP_PORT: {e}")))?,
+            username: env::var("IMAP_USERNAME")
+                .map_err(|_| Error::Config("IMAP_USERNAME not set".into()))?,
+            password: env::var("IMAP_PASSWORD")
+                .map_err(|_| Error::Config("IMAP_PASSWORD not set".into()))?,
         })
     }
 }

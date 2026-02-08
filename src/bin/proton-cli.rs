@@ -12,9 +12,7 @@ use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
 #[command(name = "proton-cli")]
-#[command(
-    about = "Read-only CLI for Proton Mail via Proton Bridge"
-)]
+#[command(about = "Read-only CLI for Proton Mail via Proton Bridge")]
 struct Args {
     #[command(subcommand)]
     command: Command,
@@ -78,8 +76,7 @@ enum Command {
 }
 
 fn parse_date(s: &str) -> Result<NaiveDate, String> {
-    NaiveDate::parse_from_str(s, "%Y-%m-%d")
-        .map_err(|e| format!("Invalid date '{s}': {e}"))
+    NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|e| format!("Invalid date '{s}': {e}"))
 }
 
 #[tokio::main]
@@ -104,11 +101,7 @@ async fn main() -> anyhow::Result<()> {
             since,
             before,
         } => {
-            cmd_list(
-                &client, &args, folder, *limit, *unseen, *since,
-                *before,
-            )
-            .await?;
+            cmd_list(&client, &args, folder, *limit, *unseen, *since, *before).await?;
         }
         Command::Show { uid, folder } => {
             cmd_show(&client, &args, folder, *uid).await?;
@@ -121,8 +114,7 @@ async fn main() -> anyhow::Result<()> {
             folder,
             limit,
         } => {
-            cmd_search(&client, &args, folder, query, *limit)
-                .await?;
+            cmd_search(&client, &args, folder, query, *limit).await?;
         }
     }
 
@@ -141,10 +133,8 @@ async fn cmd_list(
     let emails = if unseen {
         client.fetch_unseen(folder).await?
     } else if let Some(since_date) = since {
-        let before_date = before.unwrap_or_else(|| {
-            chrono::Utc::now().date_naive()
-                + chrono::Duration::days(1)
-        });
+        let before_date =
+            before.unwrap_or_else(|| chrono::Utc::now().date_naive() + chrono::Duration::days(1));
         client
             .fetch_date_range(folder, since_date, before_date)
             .await?
@@ -180,10 +170,7 @@ async fn cmd_show(
     Ok(())
 }
 
-async fn cmd_folders(
-    client: &ProtonClient,
-    args: &Args,
-) -> anyhow::Result<()> {
+async fn cmd_folders(client: &ProtonClient, args: &Args) -> anyhow::Result<()> {
     let folders = client.list_folders().await?;
 
     if args.json {
@@ -222,10 +209,7 @@ fn print_email_table(emails: &[&Email]) {
         return;
     }
 
-    let header = format!(
-        "{:<8} {:<20} {:<30} {}",
-        "UID", "Date", "From", "Subject"
-    );
+    let header = format!("{:<8} {:<20} {:<30} {}", "UID", "Date", "From", "Subject");
     println!("{header}");
     println!("{}", "-".repeat(100));
 
@@ -311,8 +295,7 @@ fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         s.to_string()
     } else {
-        let truncated: String =
-            s.chars().take(max.saturating_sub(3)).collect();
+        let truncated: String = s.chars().take(max.saturating_sub(3)).collect();
         format!("{truncated}...")
     }
 }
