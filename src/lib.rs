@@ -5,9 +5,13 @@
 
 //! Proton Mail IMAP client library
 //!
-//! A read-only IMAP client for Proton Mail via Proton Bridge.
-//! Provides email listing, search, folder enumeration, and
-//! individual message retrieval over STARTTLS.
+//! An interface to fetch emails from Proton Mail using
+//! [Proton Bridge](https://proton.me/mail/bridge). This is a
+//! read-only IMAP client that connects over STARTTLS with
+//! self-signed certificate support.
+//!
+//! Returns parsed [`Email`] structs from the
+//! [`email_parser`] crate.
 
 mod client;
 mod config;

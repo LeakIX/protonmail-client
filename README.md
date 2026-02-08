@@ -1,38 +1,17 @@
 # protonmail-client
 
-Read-only IMAP client library for Proton Mail via
-[Proton Bridge](https://proton.me/mail/bridge). Connects over STARTTLS with
-self-signed certificate support.
+A Rust interface to fetch emails from Proton Mail using
+[Proton Bridge](https://proton.me/mail/bridge). This is a read-only IMAP client
+that connects over STARTTLS with self-signed certificate support.
 
-[Documentation](https://leakix.github.io/protonmail-client)
+The library returns parsed `Email` structs from
+[email-parser](https://github.com/LeakIX/email-parser) - it does not implement
+its own email types.
 
-## Library
+- [API Documentation](https://leakix.github.io/protonmail-client)
+- [CLI usage](#cli)
 
-```rust
-use protonmail_client::{ImapConfig, ProtonClient};
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let config = ImapConfig::from_env()?;
-    let client = ProtonClient::new(config);
-
-    // List folders
-    let folders = client.list_folders().await?;
-
-    // Fetch last 10 emails
-    let emails = client.fetch_last_n("INBOX", 10).await?;
-
-    // Search
-    let results = client.search("INBOX", "FROM alice@example.com").await?;
-
-    // Fetch single email by UID
-    let email = client.fetch_uid("INBOX", 42).await?;
-
-    Ok(())
-}
-```
-
-### Environment variables
+## Environment variables
 
 | Variable | Default | Required |
 |---|---|---|
@@ -64,6 +43,10 @@ proton-cli search "FROM alice@example.com"
 # JSON output (for scripting)
 proton-cli list --json --limit 5
 ```
+
+## MSRV
+
+The minimum supported Rust version is **1.85.0** (edition 2024).
 
 ## License
 

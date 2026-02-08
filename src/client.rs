@@ -4,7 +4,7 @@ use crate::config::ImapConfig;
 use crate::error::{Error, Result};
 use async_imap::Session;
 use chrono::NaiveDate;
-use email_parser::{parse_email, Email};
+use email_parser::{Email, parse_email};
 use futures::StreamExt;
 use rustls::pki_types::ServerName;
 use std::sync::Arc;
