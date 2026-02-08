@@ -15,7 +15,7 @@ futures = "0.3"
 tokio-util = { version = "0.7", features = ["compat"] }
 
 # IMAP + TLS
-async-imap = "0.9"
+async-imap = "0.11"
 tokio-rustls = "0.26"
 rustls = { version = "0.23", features = ["ring"] }
 
