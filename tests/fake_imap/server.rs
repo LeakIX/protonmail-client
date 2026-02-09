@@ -67,9 +67,7 @@ use super::mailbox::Mailbox;
 use rcgen::generate_simple_self_signed;
 use rustls::pki_types::PrivatePkcs8KeyDer;
 use std::sync::Arc;
-use tokio::io::{
-    AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader,
-};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 
@@ -98,8 +96,7 @@ impl FakeImapServer {
         // Ensure the ring crypto provider is installed process-wide.
         // Multiple tests may race to install it, so we ignore the
         // error if it's already set.
-        let _ = rustls::crypto::ring::default_provider()
-            .install_default();
+        let _ = rustls::crypto::ring::default_provider().install_default();
 
         // Bind to any available port on localhost.
         let listener = TcpListener::bind("127.0.0.1:0")
@@ -112,15 +109,11 @@ impl FakeImapServer {
         // to. The client uses DangerousVerifier anyway, so the cert
         // details don't matter much -- but this is how you'd do it
         // properly with rcgen.
-        let cert = generate_simple_self_signed(vec![
-            "127.0.0.1".to_string(),
-        ])
-        .expect("generate self-signed cert");
+        let cert = generate_simple_self_signed(vec!["127.0.0.1".to_string()])
+            .expect("generate self-signed cert");
 
-        let cert_der =
-            rustls::pki_types::CertificateDer::from(cert.cert.der().clone());
-        let key_der =
-            PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
+        let cert_der = rustls::pki_types::CertificateDer::from(cert.cert.der().clone());
+        let key_der = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
 
         // Build a rustls ServerConfig with the generated cert.
         // This is the server-side counterpart to the client's
@@ -290,8 +283,7 @@ async fn handle_connection(
             // metadata about the folder: how many messages exist,
             // the UIDVALIDITY value (used to detect folder recreation),
             // and flags.
-            selected_folder =
-                handle_select(tag, rest, mailbox, &mut tls_reader).await;
+            selected_folder = handle_select(tag, rest, mailbox, &mut tls_reader).await;
         } else if upper.starts_with("UID SEARCH") {
             // UID SEARCH criteria
             //
@@ -354,10 +346,7 @@ async fn handle_list<S: AsyncRead + AsyncWrite + Unpin>(
     stream: &mut BufReader<S>,
 ) {
     for folder in &mailbox.folders {
-        let line = format!(
-            "* LIST (\\HasNoChildren) \"/\" \"{}\"\r\n",
-            folder.name
-        );
+        let line = format!("* LIST (\\HasNoChildren) \"/\" \"{}\"\r\n", folder.name);
         if write_line(stream, &line).await.is_err() {
             return;
         }
@@ -383,18 +372,12 @@ async fn handle_select<S: AsyncRead + AsyncWrite + Unpin>(
     stream: &mut BufReader<S>,
 ) -> Option<String> {
     // Extract folder name: "SELECT INBOX" or "SELECT \"INBOX\""
-    let folder_name = rest
-        .splitn(2, ' ')
-        .nth(1)
-        .unwrap_or("")
-        .trim_matches('"');
+    let folder_name = rest.splitn(2, ' ').nth(1).unwrap_or("").trim_matches('"');
 
     if let Some(folder) = mailbox.get_folder(folder_name) {
-        let exists =
-            format!("* {} EXISTS\r\n", folder.emails.len());
+        let exists = format!("* {} EXISTS\r\n", folder.emails.len());
         let _ = write_line(stream, &exists).await;
-        let _ =
-            write_line(stream, "* OK [UIDVALIDITY 1]\r\n").await;
+        let _ = write_line(stream, "* OK [UIDVALIDITY 1]\r\n").await;
         let resp = format!("{tag} OK [READ-WRITE] SELECT completed\r\n");
         let _ = write_line(stream, &resp).await;
         Some(folder_name.to_string())
@@ -463,10 +446,8 @@ async fn handle_uid_search<S: AsyncRead + AsyncWrite + Unpin>(
 
     // Format: "* SEARCH uid1 uid2 uid3\r\n"
     // If no results, still send "* SEARCH\r\n" (empty result set).
-    let uid_str: Vec<String> =
-        uids.iter().map(ToString::to_string).collect();
-    let search_line =
-        format!("* SEARCH {}\r\n", uid_str.join(" "));
+    let uid_str: Vec<String> = uids.iter().map(ToString::to_string).collect();
+    let search_line = format!("* SEARCH {}\r\n", uid_str.join(" "));
     let _ = write_line(stream, &search_line).await;
     let resp = format!("{tag} OK SEARCH completed\r\n");
     let _ = write_line(stream, &resp).await;
@@ -530,9 +511,7 @@ async fn handle_uid_fetch<S: AsyncRead + AsyncWrite + Unpin>(
         //
         // Real IMAP servers also return FLAGS, INTERNALDATE, etc.
         // async-imap only needs UID and BODY[] for our use case.
-        let header = format!(
-            "* {uid} FETCH (UID {uid} BODY[] {{{body_len}}}\r\n"
-        );
+        let header = format!("* {uid} FETCH (UID {uid} BODY[] {{{body_len}}}\r\n");
         if write_line(stream, &header).await.is_err() {
             return;
         }

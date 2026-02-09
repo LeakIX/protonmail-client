@@ -13,13 +13,7 @@ use protonmail_client::{ImapConfig, ProtonClient};
 ///
 /// The format follows RFC 2822: headers separated by CRLF, a blank
 /// line (CRLF CRLF) separating headers from body, and the body text.
-fn make_raw_email(
-    from: &str,
-    to: &str,
-    subject: &str,
-    body: &str,
-    date: &str,
-) -> Vec<u8> {
+fn make_raw_email(from: &str, to: &str, subject: &str, body: &str, date: &str) -> Vec<u8> {
     format!(
         "From: {from}\r\n\
          To: {to}\r\n\
@@ -104,7 +98,7 @@ async fn test_fetch_unseen() {
 
     let mailbox = MailboxBuilder::new()
         .folder("INBOX")
-        .email(1, true, &seen_email)   // seen = true -> \Seen flag
+        .email(1, true, &seen_email) // seen = true -> \Seen flag
         .email(2, false, &unseen_email) // seen = false -> UNSEEN
         .build();
 
@@ -226,9 +220,7 @@ async fn test_search() {
 
 #[tokio::test]
 async fn test_empty_mailbox() {
-    let mailbox = MailboxBuilder::new()
-        .folder("INBOX")
-        .build();
+    let mailbox = MailboxBuilder::new().folder("INBOX").build();
 
     let server = FakeImapServer::start(mailbox).await;
     let client = client_for(&server);
