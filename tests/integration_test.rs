@@ -9,7 +9,7 @@
 mod fake_imap;
 
 use fake_imap::{FakeImapServer, MailboxBuilder};
-use protonmail_client::{Folder, ImapConfig, ProtonClient};
+use protonmail_client::{Flag, Folder, ImapConfig, ProtonClient, ReadWrite};
 
 /// Build a minimal valid RFC 2822 email.
 ///
@@ -29,15 +29,23 @@ fn make_raw_email(from: &str, to: &str, subject: &str, body: &str, date: &str) -
     .into_bytes()
 }
 
-/// Create a `ProtonClient` pointed at the fake server.
+/// Create a read-only `ProtonClient` pointed at the fake server.
 fn client_for(server: &FakeImapServer) -> ProtonClient {
-    let config = ImapConfig {
+    ProtonClient::new(config_for(server))
+}
+
+/// Create a read-write `ProtonClient` pointed at the fake server.
+fn writer_for(server: &FakeImapServer) -> ProtonClient<ReadWrite> {
+    ProtonClient::new(config_for(server))
+}
+
+fn config_for(server: &FakeImapServer) -> ImapConfig {
+    ImapConfig {
         host: "127.0.0.1".to_string(),
         port: server.port(),
         username: "testuser".to_string(),
         password: "testpass".to_string(),
-    };
-    ProtonClient::new(config)
+    }
 }
 
 // ── Tests ──────────────────────────────────────────────────────────
@@ -283,4 +291,170 @@ async fn test_empty_mailbox() {
 
     let emails = client.fetch_last_n(&Folder::Inbox, 5).await.unwrap();
     assert!(emails.is_empty());
+}
+
+// ── Write operation tests ──────────────────────────────────────────
+
+#[tokio::test]
+async fn test_add_flag() {
+    let raw = make_raw_email(
+        "alice@example.com",
+        "bob@example.com",
+        "Unread message",
+        "Mark me as read.",
+        "Mon, 01 Jan 2024 12:00:00 +0000",
+    );
+
+    let mailbox = MailboxBuilder::new()
+        .folder("INBOX")
+        .email(1, false, &raw) // starts unseen
+        .build();
+
+    let server = FakeImapServer::start(mailbox).await;
+    let writer = writer_for(&server);
+
+    // Add \Seen flag.
+    writer
+        .add_flag(1, &Folder::Inbox, &Flag::Seen)
+        .await
+        .unwrap();
+
+    // Verify: fetching unseen should now return nothing.
+    let client = client_for(&server);
+    let unseen = client.fetch_unseen(&Folder::Inbox).await.unwrap();
+    assert!(unseen.is_empty());
+}
+
+#[tokio::test]
+async fn test_remove_flag() {
+    let raw = make_raw_email(
+        "alice@example.com",
+        "bob@example.com",
+        "Read message",
+        "Unmark me.",
+        "Mon, 01 Jan 2024 12:00:00 +0000",
+    );
+
+    let mailbox = MailboxBuilder::new()
+        .folder("INBOX")
+        .email(1, true, &raw) // starts seen
+        .build();
+
+    let server = FakeImapServer::start(mailbox).await;
+    let writer = writer_for(&server);
+
+    // Remove \Seen flag.
+    writer
+        .remove_flag(1, &Folder::Inbox, &Flag::Seen)
+        .await
+        .unwrap();
+
+    // Verify: fetching unseen should now return this email.
+    let client = client_for(&server);
+    let unseen = client.fetch_unseen(&Folder::Inbox).await.unwrap();
+    assert_eq!(unseen.len(), 1);
+    assert_eq!(unseen[0].uid, 1);
+}
+
+#[tokio::test]
+async fn test_move_to_folder() {
+    let raw = make_raw_email(
+        "alice@example.com",
+        "bob@example.com",
+        "Move me",
+        "Moving to trash.",
+        "Mon, 01 Jan 2024 12:00:00 +0000",
+    );
+
+    let mailbox = MailboxBuilder::new()
+        .folder("INBOX")
+        .email(1, false, &raw)
+        .folder("Trash")
+        .build();
+
+    let server = FakeImapServer::start(mailbox).await;
+    let writer = writer_for(&server);
+
+    // Move from INBOX to Trash.
+    writer
+        .move_to_folder(1, &Folder::Inbox, &Folder::Trash)
+        .await
+        .unwrap();
+
+    // Verify: INBOX should be empty, Trash should have the email.
+    let client = client_for(&server);
+    let inbox = client.fetch_all(&Folder::Inbox).await.unwrap();
+    assert!(inbox.is_empty());
+
+    let trash = client.fetch_all(&Folder::Trash).await.unwrap();
+    assert_eq!(trash.len(), 1);
+    assert_eq!(trash[0].from.address, "alice@example.com");
+}
+
+#[tokio::test]
+async fn test_archive() {
+    let raw = make_raw_email(
+        "alice@example.com",
+        "bob@example.com",
+        "Archive me",
+        "Please archive.",
+        "Mon, 01 Jan 2024 12:00:00 +0000",
+    );
+
+    let mailbox = MailboxBuilder::new()
+        .folder("INBOX")
+        .email(1, false, &raw)
+        .folder("Archive")
+        .build();
+
+    let server = FakeImapServer::start(mailbox).await;
+    let writer = writer_for(&server);
+
+    writer.archive(1, &Folder::Inbox).await.unwrap();
+
+    let client = client_for(&server);
+    let inbox = client.fetch_all(&Folder::Inbox).await.unwrap();
+    assert!(inbox.is_empty());
+
+    let archive = client.fetch_all(&Folder::Archive).await.unwrap();
+    assert_eq!(archive.len(), 1);
+}
+
+#[tokio::test]
+async fn test_unmark_all_read() {
+    let email1 = make_raw_email(
+        "alice@example.com",
+        "bob@example.com",
+        "First read",
+        "Was read.",
+        "Mon, 01 Jan 2024 10:00:00 +0000",
+    );
+    let email2 = make_raw_email(
+        "charlie@example.com",
+        "bob@example.com",
+        "Second read",
+        "Also read.",
+        "Mon, 01 Jan 2024 11:00:00 +0000",
+    );
+
+    let mailbox = MailboxBuilder::new()
+        .folder("INBOX")
+        .email(1, true, &email1) // seen
+        .email(2, true, &email2) // seen
+        .build();
+
+    let server = FakeImapServer::start(mailbox).await;
+    let writer = writer_for(&server);
+
+    // Before: no unseen emails.
+    let client = client_for(&server);
+    let unseen = client.fetch_unseen(&Folder::Inbox).await.unwrap();
+    assert!(unseen.is_empty());
+
+    // Unmark all as read.
+    writer.unmark_all_read(&Folder::Inbox).await.unwrap();
+
+    // After: both emails should be unseen.
+    let unseen = client.fetch_unseen(&Folder::Inbox).await.unwrap();
+    assert_eq!(unseen.len(), 2);
 }

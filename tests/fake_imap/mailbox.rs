@@ -12,9 +12,9 @@
 //!     .build();
 //! ```
 //!
-//! The `Mailbox` is shared with the fake IMAP server via `Arc` so the
-//! server knows which folders exist, what emails they contain, and
-//! whether each email has been read (the `\Seen` flag).
+//! The `Mailbox` is shared with the fake IMAP server via
+//! `Arc<Mutex<_>>` so the server can read and modify mailbox state
+//! (folders, emails, flags).
 
 /// A complete mailbox: a collection of named folders, each holding
 /// zero or more test emails.
@@ -24,12 +24,23 @@ pub struct Mailbox {
 }
 
 impl Mailbox {
-    /// Look up a folder by name.
+    /// Look up a folder by name (immutable).
     ///
     /// INBOX is matched case-insensitively per RFC 3501 Section 5.1.
     /// All other folder names are case-sensitive.
     pub fn get_folder(&self, name: &str) -> Option<&Folder> {
         self.folders.iter().find(|f| {
+            if name.eq_ignore_ascii_case("INBOX") {
+                f.name.eq_ignore_ascii_case("INBOX")
+            } else {
+                f.name == name
+            }
+        })
+    }
+
+    /// Look up a folder by name (mutable).
+    pub fn get_folder_mut(&mut self, name: &str) -> Option<&mut Folder> {
+        self.folders.iter_mut().find(|f| {
             if name.eq_ignore_ascii_case("INBOX") {
                 f.name.eq_ignore_ascii_case("INBOX")
             } else {
@@ -52,12 +63,15 @@ pub struct Folder {
 ///   (unlike sequence numbers which shift on delete).
 /// - `seen`: whether the `\Seen` flag is set. IMAP uses this to track
 ///   read/unread state. The UNSEEN search returns emails without it.
+/// - `deleted`: whether the `\Deleted` flag is set. EXPUNGE removes
+///   emails with this flag.
 /// - `raw`: the complete RFC 2822 message (headers + body) as bytes.
 ///   This is what gets returned in a FETCH BODY[] response.
 #[derive(Debug, Clone)]
 pub struct TestEmail {
     pub uid: u32,
     pub seen: bool,
+    pub deleted: bool,
     pub raw: Vec<u8>,
 }
 
@@ -77,7 +91,8 @@ impl MailboxBuilder {
         }
     }
 
-    /// Add a new folder. Subsequent `.email()` calls add to this folder.
+    /// Add a new folder. Subsequent `.email()` calls add to this
+    /// folder.
     pub fn folder(mut self, name: &str) -> Self {
         self.folders.push(Folder {
             name: name.to_string(),
@@ -99,6 +114,7 @@ impl MailboxBuilder {
             .push(TestEmail {
                 uid,
                 seen,
+                deleted: false,
                 raw: raw.to_vec(),
             });
         self

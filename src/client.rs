@@ -1,39 +1,83 @@
-//! Proton Mail IMAP client
+//! Proton Mail IMAP client with typestate access control
+//!
+//! `ProtonClient<M>` is parameterised by an access mode:
+//!
+//! - [`ReadOnly`]  -- only read operations (list, fetch, search)
+//! - [`ReadWrite`] -- read **and** write operations (move, flag,
+//!   archive)
+//!
+//! This prevents accidental use of destructive operations when only
+//! read access is intended.
+//!
+//! ```rust,no_run
+//! use protonmail_client::{ImapConfig, ProtonClient, ReadOnly, ReadWrite};
+//!
+//! let cfg = ImapConfig::from_env().unwrap();
+//!
+//! // Read-only client -- write methods are not available.
+//! let reader: ProtonClient<ReadOnly> = ProtonClient::new(cfg.clone());
+//!
+//! // Read-write client -- all methods are available.
+//! let writer: ProtonClient<ReadWrite> = ProtonClient::new(cfg);
+//! ```
+
+use std::marker::PhantomData;
 
 use crate::config::ImapConfig;
+use crate::connection::{self, ImapSession};
 use crate::error::{Error, Result};
+use crate::flag::Flag;
 use crate::folder::Folder;
-use async_imap::Session;
 use chrono::NaiveDate;
 use email_parser::{Email, parse_email};
-use futures::StreamExt;
-use rustls::pki_types::ServerName;
-use std::sync::Arc;
-use tokio::net::TcpStream;
-use tokio_rustls::TlsConnector;
-use tokio_util::compat::{Compat, TokioAsyncReadCompatExt};
-use tracing::{debug, info, warn};
+use futures::{StreamExt, pin_mut};
+use tracing::{info, warn};
 
-type ImapSession = Session<Compat<tokio_rustls::client::TlsStream<TcpStream>>>;
+// ── Access-mode markers ────────────────────────────────────────────
 
-/// Read-only IMAP client for Proton Mail via Proton Bridge
-pub struct ProtonClient {
+/// Marker: read-only access. Write methods are not available.
+#[derive(Debug, Clone, Copy)]
+pub struct ReadOnly;
+
+/// Marker: read-write access. All methods are available.
+#[derive(Debug, Clone, Copy)]
+pub struct ReadWrite;
+
+// ── Client ─────────────────────────────────────────────────────────
+
+/// IMAP client for Proton Mail via Proton Bridge.
+///
+/// The type parameter `M` controls which operations are available:
+///
+/// | `M`         | Read ops | Write ops |
+/// |-------------|----------|-----------|
+/// | `ReadOnly`  | yes      | no        |
+/// | `ReadWrite` | yes      | yes       |
+pub struct ProtonClient<M = ReadOnly> {
     config: ImapConfig,
+    _mode: PhantomData<M>,
 }
 
-impl ProtonClient {
+impl<M> ProtonClient<M> {
     #[must_use]
     pub const fn new(config: ImapConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            _mode: PhantomData,
+        }
     }
+}
 
-    /// List all available IMAP folders
+// ── Read operations (available on any M) ───────────────────────────
+
+impl<M: Send + Sync> ProtonClient<M> {
+    /// List all available IMAP folders.
     ///
     /// # Errors
     ///
     /// Returns an error if the connection or LIST command fails.
     pub async fn list_folders(&self) -> Result<Vec<String>> {
-        let mut session = self.connect().await?;
+        let mut session = connection::connect(&self.config).await?;
 
         let mut folder_stream = session
             .list(Some(""), Some("*"))
@@ -52,23 +96,23 @@ impl ProtonClient {
         Ok(names)
     }
 
-    /// Fetch a single email by UID from a folder
+    /// Fetch a single email by UID from a folder.
     ///
     /// # Errors
     ///
     /// Returns an error if the connection, SELECT, or FETCH fails,
     /// or if the message body cannot be parsed.
     pub async fn fetch_uid(&self, folder: &Folder, uid: u32) -> Result<Email> {
-        let mut session = self.connect().await?;
-        self.select(&mut session, folder.as_str()).await?;
+        let mut session = connection::connect(&self.config).await?;
+        connection::select(&mut session, folder.as_str()).await?;
 
-        let email = self.fetch_single(&mut session, uid).await?;
+        let email = Self::fetch_single(&mut session, uid).await?;
 
         session.logout().await.ok();
         Ok(email)
     }
 
-    /// Fetch all unseen emails from a folder
+    /// Fetch all unseen emails from a folder.
     ///
     /// # Errors
     ///
@@ -77,7 +121,7 @@ impl ProtonClient {
         self.search(folder, "UNSEEN").await
     }
 
-    /// Fetch all emails from a folder
+    /// Fetch all emails from a folder.
     ///
     /// # Errors
     ///
@@ -86,15 +130,15 @@ impl ProtonClient {
         self.search(folder, "ALL").await
     }
 
-    /// Fetch the N most recent emails from a folder
+    /// Fetch the N most recent emails from a folder.
     ///
     /// # Errors
     ///
     /// Returns an error if the connection, SELECT, SEARCH, or
     /// FETCH fails.
     pub async fn fetch_last_n(&self, folder: &Folder, n: usize) -> Result<Vec<Email>> {
-        let mut session = self.connect().await?;
-        self.select(&mut session, folder.as_str()).await?;
+        let mut session = connection::connect(&self.config).await?;
+        connection::select(&mut session, folder.as_str()).await?;
 
         let uids = session
             .uid_search("ALL")
@@ -114,14 +158,14 @@ impl ProtonClient {
 
         info!("Fetching {} most recent messages", recent_uids.len());
 
-        let mut emails = self.fetch_by_uids(&mut session, recent_uids).await?;
+        let mut emails = Self::fetch_by_uids(&mut session, recent_uids).await?;
         emails.sort_by(|a, b| b.date.cmp(&a.date));
 
         session.logout().await.ok();
         Ok(emails)
     }
 
-    /// Fetch emails within a date range from a folder
+    /// Fetch emails within a date range from a folder.
     ///
     /// IMAP semantics: SINCE >= date, BEFORE < date.
     ///
@@ -143,14 +187,14 @@ impl ProtonClient {
         Ok(emails)
     }
 
-    /// Search emails using an arbitrary IMAP search query
+    /// Search emails using an arbitrary IMAP search query.
     ///
     /// # Errors
     ///
     /// Returns an error if the connection, SELECT, or SEARCH fails.
     pub async fn search(&self, folder: &Folder, query: &str) -> Result<Vec<Email>> {
-        let mut session = self.connect().await?;
-        self.select(&mut session, folder.as_str()).await?;
+        let mut session = connection::connect(&self.config).await?;
+        connection::select(&mut session, folder.as_str()).await?;
 
         let uids = session
             .uid_search(query)
@@ -165,69 +209,19 @@ impl ProtonClient {
 
         info!("Found {} messages matching '{}'", uid_list.len(), query);
 
-        let emails = self.fetch_by_uids(&mut session, &uid_list).await?;
+        let emails = Self::fetch_by_uids(&mut session, &uid_list).await?;
 
         session.logout().await.ok();
         Ok(emails)
     }
 
-    // -- private helpers --
+    // -- private helpers (read) --
 
-    #[allow(clippy::unused_self, clippy::unnecessary_wraps)]
-    fn tls_connector(&self) -> Result<TlsConnector> {
-        let config = rustls::ClientConfig::builder()
-            .dangerous()
-            .with_custom_certificate_verifier(Arc::new(DangerousVerifier))
-            .with_no_client_auth();
-        Ok(TlsConnector::from(Arc::new(config)))
-    }
-
-    async fn connect(&self) -> Result<ImapSession> {
-        let addr = format!("{}:{}", self.config.host, self.config.port);
-        debug!("Connecting to IMAP server at {}", addr);
-
-        let tcp_stream = TcpStream::connect(&addr).await?;
-        let mut client = async_imap::Client::new(tcp_stream.compat());
-
-        client
-            .run_command_and_check_ok("STARTTLS", None)
-            .await
-            .map_err(|e| Error::Tls(format!("STARTTLS failed: {e}")))?;
-
-        let connector = self.tls_connector()?;
-        let server_name = ServerName::try_from(self.config.host.clone())
-            .map_err(|e| Error::Tls(format!("Invalid server name: {e}")))?;
-
-        let inner = client.into_inner().into_inner();
-        let tls_stream = connector
-            .connect(server_name, inner)
-            .await
-            .map_err(|e| Error::Tls(e.to_string()))?;
-
-        let tls_client = async_imap::Client::new(tls_stream.compat());
-
-        let session = tls_client
-            .login(&self.config.username, &self.config.password)
-            .await
-            .map_err(|(e, _)| Error::Imap(format!("Login failed: {e}")))?;
-
-        info!("Connected to IMAP server");
-        Ok(session)
-    }
-
-    async fn select(&self, session: &mut ImapSession, folder: &str) -> Result<()> {
-        session
-            .select(folder)
-            .await
-            .map_err(|e| Error::Imap(format!("Failed to select {folder}: {e}")))?;
-        Ok(())
-    }
-
-    async fn fetch_by_uids(&self, session: &mut ImapSession, uids: &[u32]) -> Result<Vec<Email>> {
+    async fn fetch_by_uids(session: &mut ImapSession, uids: &[u32]) -> Result<Vec<Email>> {
         let mut emails = Vec::new();
 
         for uid in uids {
-            match self.fetch_single(session, *uid).await {
+            match Self::fetch_single(session, *uid).await {
                 Ok(email) => emails.push(email),
                 Err(e) => {
                     warn!("Failed to fetch UID {}: {}", uid, e);
@@ -238,7 +232,7 @@ impl ProtonClient {
         Ok(emails)
     }
 
-    async fn fetch_single(&self, session: &mut ImapSession, uid: u32) -> Result<Email> {
+    async fn fetch_single(session: &mut ImapSession, uid: u32) -> Result<Email> {
         let uid_set = format!("{uid}");
         let mut messages = session
             .uid_fetch(&uid_set, "(BODY.PEEK[])")
@@ -256,53 +250,141 @@ impl ProtonClient {
     }
 }
 
-/// Certificate verifier that accepts all certificates
-/// (for Proton Bridge self-signed certs)
-#[derive(Debug)]
-struct DangerousVerifier;
+// ── Write operations (only on ReadWrite) ───────────────────────────
 
-impl rustls::client::danger::ServerCertVerifier for DangerousVerifier {
-    fn verify_server_cert(
-        &self,
-        _end_entity: &rustls::pki_types::CertificateDer<'_>,
-        _intermediates: &[rustls::pki_types::CertificateDer<'_>],
-        _server_name: &rustls::pki_types::ServerName<'_>,
-        _ocsp_response: &[u8],
-        _now: rustls::pki_types::UnixTime,
-    ) -> std::result::Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
-        Ok(rustls::client::danger::ServerCertVerified::assertion())
+impl ProtonClient<ReadWrite> {
+    /// Move an email from one folder to another.
+    ///
+    /// Selects `from`, copies the message to `to`, marks it
+    /// `\Deleted` in the source folder, and expunges.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any IMAP command fails.
+    pub async fn move_to_folder(&self, uid: u32, from: &Folder, to: &Folder) -> Result<()> {
+        let mut session = connection::connect(&self.config).await?;
+        connection::select(&mut session, from.as_str()).await?;
+
+        let uid_set = format!("{uid}");
+
+        // COPY to destination
+        session
+            .uid_copy(&uid_set, to.as_str())
+            .await
+            .map_err(|e| Error::Imap(format!("Copy failed: {e}")))?;
+
+        // Mark \Deleted in source
+        let mut store_stream = session
+            .uid_store(&uid_set, "+FLAGS (\\Deleted)")
+            .await
+            .map_err(|e| Error::Imap(format!("Store +Deleted failed: {e}")))?;
+        while store_stream.next().await.is_some() {}
+        drop(store_stream);
+
+        // Expunge to permanently remove
+        {
+            let expunge_stream = session
+                .expunge()
+                .await
+                .map_err(|e| Error::Imap(format!("Expunge failed: {e}")))?;
+            pin_mut!(expunge_stream);
+            while expunge_stream.next().await.is_some() {}
+        }
+
+        session.logout().await.ok();
+        Ok(())
     }
 
-    fn verify_tls12_signature(
-        &self,
-        _message: &[u8],
-        _cert: &rustls::pki_types::CertificateDer<'_>,
-        _dss: &rustls::DigitallySignedStruct,
-    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    /// Add a flag to an email.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection, SELECT, or STORE fails.
+    pub async fn add_flag(&self, uid: u32, folder: &Folder, flag: &Flag) -> Result<()> {
+        let mut session = connection::connect(&self.config).await?;
+        connection::select(&mut session, folder.as_str()).await?;
+
+        let uid_set = format!("{uid}");
+        let store_arg = format!("+FLAGS ({})", flag.as_imap_str());
+
+        let mut stream = session
+            .uid_store(&uid_set, &store_arg)
+            .await
+            .map_err(|e| Error::Imap(format!("Store failed: {e}")))?;
+        while stream.next().await.is_some() {}
+        drop(stream);
+
+        session.logout().await.ok();
+        Ok(())
     }
 
-    fn verify_tls13_signature(
-        &self,
-        _message: &[u8],
-        _cert: &rustls::pki_types::CertificateDer<'_>,
-        _dss: &rustls::DigitallySignedStruct,
-    ) -> std::result::Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
-        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    /// Remove a flag from an email.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection, SELECT, or STORE fails.
+    pub async fn remove_flag(&self, uid: u32, folder: &Folder, flag: &Flag) -> Result<()> {
+        let mut session = connection::connect(&self.config).await?;
+        connection::select(&mut session, folder.as_str()).await?;
+
+        let uid_set = format!("{uid}");
+        let store_arg = format!("-FLAGS ({})", flag.as_imap_str());
+
+        let mut stream = session
+            .uid_store(&uid_set, &store_arg)
+            .await
+            .map_err(|e| Error::Imap(format!("Store failed: {e}")))?;
+        while stream.next().await.is_some() {}
+        drop(stream);
+
+        session.logout().await.ok();
+        Ok(())
     }
 
-    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
-        vec![
-            rustls::SignatureScheme::RSA_PKCS1_SHA256,
-            rustls::SignatureScheme::RSA_PKCS1_SHA384,
-            rustls::SignatureScheme::RSA_PKCS1_SHA512,
-            rustls::SignatureScheme::ECDSA_NISTP256_SHA256,
-            rustls::SignatureScheme::ECDSA_NISTP384_SHA384,
-            rustls::SignatureScheme::ECDSA_NISTP521_SHA512,
-            rustls::SignatureScheme::RSA_PSS_SHA256,
-            rustls::SignatureScheme::RSA_PSS_SHA384,
-            rustls::SignatureScheme::RSA_PSS_SHA512,
-            rustls::SignatureScheme::ED25519,
-        ]
+    /// Archive an email by moving it to the Archive folder.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the move operation fails.
+    pub async fn archive(&self, uid: u32, from: &Folder) -> Result<()> {
+        self.move_to_folder(uid, from, &Folder::Archive).await
+    }
+
+    /// Remove the `\Seen` flag from all messages in a folder.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection, SELECT, SEARCH, or STORE
+    /// fails.
+    pub async fn unmark_all_read(&self, folder: &Folder) -> Result<()> {
+        let mut session = connection::connect(&self.config).await?;
+        connection::select(&mut session, folder.as_str()).await?;
+
+        let uids = session
+            .uid_search("SEEN")
+            .await
+            .map_err(|e| Error::Imap(format!("Search failed: {e}")))?;
+
+        let uid_list: Vec<u32> = uids.into_iter().collect();
+        if uid_list.is_empty() {
+            session.logout().await.ok();
+            return Ok(());
+        }
+
+        let uid_set = uid_list
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+
+        let mut stream = session
+            .uid_store(&uid_set, "-FLAGS (\\Seen)")
+            .await
+            .map_err(|e| Error::Imap(format!("Store failed: {e}")))?;
+        while stream.next().await.is_some() {}
+        drop(stream);
+
+        session.logout().await.ok();
+        Ok(())
     }
 }
