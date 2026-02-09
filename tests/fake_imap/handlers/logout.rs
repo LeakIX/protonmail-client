@@ -11,7 +11,7 @@ pub async fn handle_logout<S: AsyncRead + AsyncWrite + Unpin>(
     tag: &str,
     stream: &mut BufReader<S>,
 ) {
-    let _ = write_line(stream, "* BYE\r\n").await;
+    let _ = write_line(stream, "* BYE Server logging out\r\n").await;
     let resp = format!("{tag} OK LOGOUT completed\r\n");
     let _ = write_line(stream, &resp).await;
 }
@@ -38,7 +38,7 @@ mod tests {
     #[tokio::test]
     async fn sends_bye_then_ok() {
         let output = run("A0005").await;
-        assert!(output.starts_with("* BYE\r\n"));
+        assert!(output.starts_with("* BYE Server logging out\r\n"));
         assert!(output.contains("A0005 OK LOGOUT completed\r\n"));
     }
 

@@ -64,7 +64,8 @@
 //! exactly `bytecount` bytes, then expects the closing `)`.
 
 use super::handlers::{
-    handle_list, handle_login, handle_logout, handle_select, handle_uid_fetch, handle_uid_search,
+    handle_capability, handle_list, handle_login, handle_logout, handle_noop, handle_select,
+    handle_uid_fetch, handle_uid_search,
 };
 use super::io::write_line;
 use super::mailbox::Mailbox;
@@ -288,6 +289,12 @@ async fn handle_imap_session<S: AsyncRead + AsyncWrite + Unpin>(stream: S, mailb
         let tag = command.tag.inner();
 
         match command.body {
+            CommandBody::Capability => {
+                handle_capability(tag, &mut reader).await;
+            }
+            CommandBody::Noop => {
+                handle_noop(tag, &mut reader).await;
+            }
             CommandBody::Login { .. } => {
                 if !handle_login(tag, &mut reader).await {
                     break;
