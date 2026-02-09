@@ -34,6 +34,7 @@ clap = { version = "4.5", features = ["derive"] }
 tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 
 [dev-dependencies]
+imap-codec = "2.0.0-alpha.6"
 rcgen = "0.13"
 rustls-pemfile = "2"
 tokio = { version = "1.44", features = ["full"] }

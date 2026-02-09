@@ -3,6 +3,15 @@
 version = 4
 
 [[package]]
+name = "abnf-core"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec182d1f071b906a9f59269c89af101515a5cbe58f723eb6717e7fe7445c0dea"
+dependencies = [
+ "nom",
+]
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -290,6 +299,23 @@ dependencies = [
  "futures-io",
  "futures-lite",
  "piper",
+]
+
+[[package]]
+name = "bounded-static"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0beb903daa49b43bcafb5d5eebe633f9ad638d8b16cd08f95fb05ee7bd099321"
+
+[[package]]
+name = "bounded-static-derive"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0af050e27e5d57aa14975f97fe47a134c46a390f91819f23a625319a7111bfa"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -725,12 +751,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "imap-codec"
+version = "2.0.0-alpha.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d4087870a6597c456aa5860034b92139609b0e4a4102bc9f5c8c69343c341d0b"
+dependencies = [
+ "abnf-core",
+ "base64",
+ "chrono",
+ "imap-types",
+ "log",
+ "nom",
+]
+
+[[package]]
 name = "imap-proto"
 version = "0.16.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba1f9b30846c3d04371159ef3a0413ce7c1ae0a8c619cd255c60b3d902553f22"
 dependencies = [
  "nom",
+]
+
+[[package]]
+name = "imap-types"
+version = "2.0.0-alpha.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b49c2dbf4dad892189b1b0bf407da23f3a6c681b2be2fdca555a53ca9f4d982"
+dependencies = [
+ "base64",
+ "bounded-static",
+ "bounded-static-derive",
+ "chrono",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -1019,6 +1072,7 @@ dependencies = [
  "dotenvy",
  "email-parser",
  "futures",
+ "imap-codec",
  "rcgen",
  "rustls",
  "rustls-pemfile",

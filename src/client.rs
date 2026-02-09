@@ -2,6 +2,7 @@
 
 use crate::config::ImapConfig;
 use crate::error::{Error, Result};
+use crate::folder::Folder;
 use async_imap::Session;
 use chrono::NaiveDate;
 use email_parser::{Email, parse_email};
@@ -57,9 +58,9 @@ impl ProtonClient {
     ///
     /// Returns an error if the connection, SELECT, or FETCH fails,
     /// or if the message body cannot be parsed.
-    pub async fn fetch_uid(&self, folder: &str, uid: u32) -> Result<Email> {
+    pub async fn fetch_uid(&self, folder: &Folder, uid: u32) -> Result<Email> {
         let mut session = self.connect().await?;
-        self.select(&mut session, folder).await?;
+        self.select(&mut session, folder.as_str()).await?;
 
         let email = self.fetch_single(&mut session, uid).await?;
 
@@ -72,7 +73,7 @@ impl ProtonClient {
     /// # Errors
     ///
     /// Returns an error if the connection, SELECT, or SEARCH fails.
-    pub async fn fetch_unseen(&self, folder: &str) -> Result<Vec<Email>> {
+    pub async fn fetch_unseen(&self, folder: &Folder) -> Result<Vec<Email>> {
         self.search(folder, "UNSEEN").await
     }
 
@@ -81,7 +82,7 @@ impl ProtonClient {
     /// # Errors
     ///
     /// Returns an error if the connection, SELECT, or SEARCH fails.
-    pub async fn fetch_all(&self, folder: &str) -> Result<Vec<Email>> {
+    pub async fn fetch_all(&self, folder: &Folder) -> Result<Vec<Email>> {
         self.search(folder, "ALL").await
     }
 
@@ -91,9 +92,9 @@ impl ProtonClient {
     ///
     /// Returns an error if the connection, SELECT, SEARCH, or
     /// FETCH fails.
-    pub async fn fetch_last_n(&self, folder: &str, n: usize) -> Result<Vec<Email>> {
+    pub async fn fetch_last_n(&self, folder: &Folder, n: usize) -> Result<Vec<Email>> {
         let mut session = self.connect().await?;
-        self.select(&mut session, folder).await?;
+        self.select(&mut session, folder.as_str()).await?;
 
         let uids = session
             .uid_search("ALL")
@@ -129,7 +130,7 @@ impl ProtonClient {
     /// Returns an error if the connection, SELECT, or SEARCH fails.
     pub async fn fetch_date_range(
         &self,
-        folder: &str,
+        folder: &Folder,
         since: NaiveDate,
         before: NaiveDate,
     ) -> Result<Vec<Email>> {
@@ -147,9 +148,9 @@ impl ProtonClient {
     /// # Errors
     ///
     /// Returns an error if the connection, SELECT, or SEARCH fails.
-    pub async fn search(&self, folder: &str, query: &str) -> Result<Vec<Email>> {
+    pub async fn search(&self, folder: &Folder, query: &str) -> Result<Vec<Email>> {
         let mut session = self.connect().await?;
-        self.select(&mut session, folder).await?;
+        self.select(&mut session, folder.as_str()).await?;
 
         let uids = session
             .uid_search(query)

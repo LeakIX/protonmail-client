@@ -241,3 +241,50 @@ async fn test_list_json() {
         assert!(entry.get("subject").is_some(), "missing subject field");
     }
 }
+
+#[tokio::test]
+async fn test_list_date_range() {
+    let jan1 = make_raw_email(
+        "alice@example.com",
+        "bob@example.com",
+        "New Year",
+        "Happy new year!",
+        "Mon, 01 Jan 2024 10:00:00 +0000",
+    );
+    let jan10 = make_raw_email(
+        "charlie@example.com",
+        "bob@example.com",
+        "Mid January",
+        "Midway through the month.",
+        "Wed, 10 Jan 2024 10:00:00 +0000",
+    );
+    let jan20 = make_raw_email(
+        "dave@example.com",
+        "bob@example.com",
+        "Late January",
+        "Almost February.",
+        "Sat, 20 Jan 2024 10:00:00 +0000",
+    );
+
+    let mailbox = MailboxBuilder::new()
+        .folder("INBOX")
+        .email(1, true, &jan1)
+        .email(2, true, &jan10)
+        .email(3, true, &jan20)
+        .build();
+
+    let server = FakeImapServer::start(mailbox).await;
+    let (stdout, _, success) = run_cli(
+        &server,
+        &["list", "--since", "2024-01-05", "--before", "2024-01-15"],
+    )
+    .await;
+
+    assert!(success, "proton-cli list --since --before failed");
+
+    // Only the Jan 10 email should be in range [Jan 5, Jan 15).
+    assert!(stdout.contains("charlie@example.com"));
+    assert!(!stdout.contains("alice@example.com"));
+    assert!(!stdout.contains("dave@example.com"));
+    assert!(stdout.contains("1 email(s)"));
+}

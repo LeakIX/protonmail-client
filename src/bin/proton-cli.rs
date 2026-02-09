@@ -2,7 +2,7 @@
 
 use chrono::NaiveDate;
 use clap::{Parser, Subcommand};
-use protonmail_client::{Email, ImapConfig, ProtonClient};
+use protonmail_client::{Email, Folder, ImapConfig, ProtonClient};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
@@ -96,10 +96,12 @@ async fn main() -> anyhow::Result<()> {
             since,
             before,
         } => {
-            cmd_list(&client, &args, folder, *limit, *unseen, *since, *before).await?;
+            let folder = Folder::from(folder.as_str());
+            cmd_list(&client, &args, &folder, *limit, *unseen, *since, *before).await?;
         }
         Command::Show { uid, folder } => {
-            cmd_show(&client, &args, folder, *uid).await?;
+            let folder = Folder::from(folder.as_str());
+            cmd_show(&client, &args, &folder, *uid).await?;
         }
         Command::Folders => {
             cmd_folders(&client, &args).await?;
@@ -109,7 +111,8 @@ async fn main() -> anyhow::Result<()> {
             folder,
             limit,
         } => {
-            cmd_search(&client, &args, folder, query, *limit).await?;
+            let folder = Folder::from(folder.as_str());
+            cmd_search(&client, &args, &folder, query, *limit).await?;
         }
     }
 
@@ -119,7 +122,7 @@ async fn main() -> anyhow::Result<()> {
 async fn cmd_list(
     client: &ProtonClient,
     args: &Args,
-    folder: &str,
+    folder: &Folder,
     limit: usize,
     unseen: bool,
     since: Option<NaiveDate>,
@@ -151,7 +154,7 @@ async fn cmd_list(
 async fn cmd_show(
     client: &ProtonClient,
     args: &Args,
-    folder: &str,
+    folder: &Folder,
     uid: u32,
 ) -> anyhow::Result<()> {
     let email = client.fetch_uid(folder, uid).await?;
@@ -182,7 +185,7 @@ async fn cmd_folders(client: &ProtonClient, args: &Args) -> anyhow::Result<()> {
 async fn cmd_search(
     client: &ProtonClient,
     args: &Args,
-    folder: &str,
+    folder: &Folder,
     query: &str,
     limit: usize,
 ) -> anyhow::Result<()> {

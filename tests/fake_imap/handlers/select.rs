@@ -16,13 +16,10 @@ use tokio::io::{AsyncRead, AsyncWrite, BufReader};
 /// Handle the SELECT command. Returns the selected folder name.
 pub async fn handle_select<S: AsyncRead + AsyncWrite + Unpin>(
     tag: &str,
-    rest: &str,
+    folder_name: &str,
     mailbox: &Mailbox,
     stream: &mut BufReader<S>,
 ) -> Option<String> {
-    // Extract folder name: "SELECT INBOX" or "SELECT \"INBOX\""
-    let folder_name = rest.split_once(' ').map_or("", |x| x.1).trim_matches('"');
-
     if let Some(folder) = mailbox.get_folder(folder_name) {
         let exists = format!("* {} EXISTS\r\n", folder.emails.len());
         let _ = write_line(stream, &exists).await;
@@ -47,11 +44,11 @@ mod tests {
         b"From: a@b.com\r\nSubject: Test\r\n\r\nBody".to_vec()
     }
 
-    async fn run(tag: &str, rest: &str, mailbox: &Mailbox) -> (String, Option<String>) {
+    async fn run(tag: &str, folder_name: &str, mailbox: &Mailbox) -> (String, Option<String>) {
         let (client, server) = tokio::io::duplex(4096);
         let mut stream = BufReader::new(server);
 
-        let selected = handle_select(tag, rest, mailbox, &mut stream).await;
+        let selected = handle_select(tag, folder_name, mailbox, &mut stream).await;
         drop(stream);
 
         let mut buf = Vec::new();
@@ -70,7 +67,7 @@ mod tests {
             .email(2, true, &raw)
             .build();
 
-        let (output, selected) = run("A1", "SELECT INBOX", &mailbox).await;
+        let (output, selected) = run("A1", "INBOX", &mailbox).await;
 
         assert_eq!(selected, Some("INBOX".to_string()));
         assert!(output.contains("* 2 EXISTS"));
@@ -82,19 +79,10 @@ mod tests {
     async fn returns_none_for_missing_folder() {
         let mailbox = MailboxBuilder::new().folder("INBOX").build();
 
-        let (output, selected) = run("A1", "SELECT NoSuchFolder", &mailbox).await;
+        let (output, selected) = run("A1", "NoSuchFolder", &mailbox).await;
 
         assert!(selected.is_none());
         assert!(output.contains("A1 NO Folder not found"));
-    }
-
-    #[tokio::test]
-    async fn handles_quoted_folder_name() {
-        let mailbox = MailboxBuilder::new().folder("INBOX").build();
-
-        let (_, selected) = run("A1", "SELECT \"INBOX\"", &mailbox).await;
-
-        assert_eq!(selected, Some("INBOX".to_string()));
     }
 
     #[tokio::test]
@@ -107,7 +95,7 @@ mod tests {
             .email(3, false, &raw)
             .build();
 
-        let (output, _) = run("A1", "SELECT INBOX", &mailbox).await;
+        let (output, _) = run("A1", "INBOX", &mailbox).await;
         assert!(output.contains("* 3 EXISTS"));
     }
 }

@@ -68,6 +68,10 @@ use super::handlers::{
 };
 use super::io::write_line;
 use super::mailbox::Mailbox;
+use imap_codec::CommandCodec;
+use imap_codec::decode::Decoder;
+use imap_codec::imap_types::command::CommandBody;
+use imap_codec::imap_types::mailbox::Mailbox as ImapMailbox;
 use rcgen::generate_simple_self_signed;
 use rustls::pki_types::PrivatePkcs8KeyDer;
 use std::sync::Arc;
@@ -193,7 +197,9 @@ async fn handle_connection(
         return;
     }
 
-    // Parse the tag and command. The line looks like "A0001 STARTTLS\r\n".
+    // Parse the tag and command. The line looks like
+    // "A0001 STARTTLS\r\n". We handle STARTTLS manually (pre-TLS)
+    // since imap-codec is only used after TLS is established.
     let parts: Vec<&str> = line.trim().splitn(2, ' ').collect();
     if parts.len() < 2 {
         return;
@@ -233,18 +239,31 @@ async fn handle_connection(
     handle_imap_session(tls_stream, mailbox).await;
 }
 
+/// Extract the folder name from a parsed `imap_types::Mailbox`.
+fn mailbox_name(mb: &ImapMailbox<'_>) -> String {
+    match mb {
+        ImapMailbox::Inbox => "INBOX".to_string(),
+        ImapMailbox::Other(other) => {
+            let bytes: &[u8] = other.as_ref();
+            String::from_utf8_lossy(bytes).into_owned()
+        }
+    }
+}
+
 /// Run the authenticated IMAP command loop over an established stream.
 ///
-/// Dispatches each client command to the appropriate handler in
-/// `handlers/`.
+/// Uses `imap-codec`'s `CommandCodec` to parse each client command
+/// into a strongly-typed `Command`, then dispatches to the
+/// appropriate handler based on the `CommandBody` variant.
 async fn handle_imap_session<S: AsyncRead + AsyncWrite + Unpin>(stream: S, mailbox: &Mailbox) {
     let mut reader = BufReader::new(stream);
     let mut selected_folder: Option<String> = None;
+    let codec = CommandCodec::default();
 
     loop {
         let mut line = String::new();
         match reader.read_line(&mut line).await {
-            Ok(0) | Err(_) => break, // Connection closed or error
+            Ok(0) | Err(_) => break,
             Ok(_) => {}
         }
 
@@ -253,41 +272,71 @@ async fn handle_imap_session<S: AsyncRead + AsyncWrite + Unpin>(stream: S, mailb
             continue;
         }
 
-        // Split into tag and the rest of the command.
-        // Example: "A0003 UID SEARCH UNSEEN" -> tag="A0003",
-        //   rest="UID SEARCH UNSEEN"
-        let parts: Vec<&str> = trimmed.splitn(2, ' ').collect();
-        if parts.len() < 2 {
-            continue;
-        }
-        let tag = parts[0];
-        let rest = parts[1];
-
-        // Dispatch based on the command keyword. We match
-        // case-insensitively since RFC 3501 says commands are
-        // case-insensitive.
-        let upper = rest.to_uppercase();
-
-        if upper.starts_with("LOGIN") {
-            if !handle_login(tag, &mut reader).await {
-                break;
-            }
-        } else if upper.starts_with("LIST") {
-            handle_list(tag, mailbox, &mut reader).await;
-        } else if upper.starts_with("SELECT") {
-            selected_folder = handle_select(tag, rest, mailbox, &mut reader).await;
-        } else if upper.starts_with("UID SEARCH") {
-            handle_uid_search(tag, rest, mailbox, selected_folder.as_deref(), &mut reader).await;
-        } else if upper.starts_with("UID FETCH") {
-            handle_uid_fetch(tag, rest, mailbox, selected_folder.as_deref(), &mut reader).await;
-        } else if upper.starts_with("LOGOUT") {
-            handle_logout(tag, &mut reader).await;
-            break;
-        } else {
-            // Unknown command -- respond with BAD.
-            let resp = format!("{tag} BAD Unknown command\r\n");
+        // Parse the command line using imap-codec.
+        let line_bytes = line.as_bytes();
+        let Ok((_, command)) = codec.decode(line_bytes) else {
+            // Fall back to manual tag extraction for the BAD
+            // response.
+            let tag = trimmed.split_whitespace().next().unwrap_or("*");
+            let resp = format!("{tag} BAD Parse error\r\n");
             if write_line(&mut reader, &resp).await.is_err() {
                 break;
+            }
+            continue;
+        };
+
+        let tag = command.tag.inner();
+
+        match command.body {
+            CommandBody::Login { .. } => {
+                if !handle_login(tag, &mut reader).await {
+                    break;
+                }
+            }
+            CommandBody::List { .. } => {
+                handle_list(tag, mailbox, &mut reader).await;
+            }
+            CommandBody::Select { mailbox: mb, .. } => {
+                let name = mailbox_name(&mb);
+                selected_folder = handle_select(tag, &name, mailbox, &mut reader).await;
+            }
+            CommandBody::Search {
+                criteria,
+                uid: true,
+                ..
+            } => {
+                handle_uid_search(
+                    tag,
+                    criteria.as_ref(),
+                    mailbox,
+                    selected_folder.as_deref(),
+                    &mut reader,
+                )
+                .await;
+            }
+            CommandBody::Fetch {
+                sequence_set,
+                uid: true,
+                ..
+            } => {
+                handle_uid_fetch(
+                    tag,
+                    &sequence_set,
+                    mailbox,
+                    selected_folder.as_deref(),
+                    &mut reader,
+                )
+                .await;
+            }
+            CommandBody::Logout => {
+                handle_logout(tag, &mut reader).await;
+                break;
+            }
+            _ => {
+                let resp = format!("{tag} BAD Unknown command\r\n");
+                if write_line(&mut reader, &resp).await.is_err() {
+                    break;
+                }
             }
         }
     }
