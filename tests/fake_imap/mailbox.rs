@@ -24,9 +24,18 @@ pub struct Mailbox {
 }
 
 impl Mailbox {
-    /// Look up a folder by name (case-sensitive, matching real IMAP).
+    /// Look up a folder by name.
+    ///
+    /// INBOX is matched case-insensitively per RFC 3501 Section 5.1.
+    /// All other folder names are case-sensitive.
     pub fn get_folder(&self, name: &str) -> Option<&Folder> {
-        self.folders.iter().find(|f| f.name == name)
+        self.folders.iter().find(|f| {
+            if name.eq_ignore_ascii_case("INBOX") {
+                f.name.eq_ignore_ascii_case("INBOX")
+            } else {
+                f.name == name
+            }
+        })
     }
 }
 
