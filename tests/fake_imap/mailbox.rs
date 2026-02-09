@@ -2,7 +2,7 @@
 //!
 //! Provides a builder-style API for constructing mailbox state:
 //!
-//! ```ignore
+//! ```rust
 //! let mailbox = MailboxBuilder::new()
 //!     .folder("INBOX")
 //!         .email(1, false, raw_rfc2822_bytes)
