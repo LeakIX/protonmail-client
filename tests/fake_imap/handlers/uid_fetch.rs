@@ -19,13 +19,29 @@
 
 use crate::fake_imap::io::{write_bytes, write_line};
 use crate::fake_imap::mailbox::Mailbox;
+use imap_codec::imap_types::sequence::{SeqOrUid, Sequence, SequenceSet};
 use tokio::io::{AsyncRead, AsyncWrite, BufReader};
+
+/// Extract UIDs from a `SequenceSet`. We only support single values
+/// (not ranges) since that's what `async-imap` sends for individual
+/// fetches.
+fn extract_uids(seq_set: &SequenceSet) -> Vec<u32> {
+    seq_set
+        .0
+        .as_ref()
+        .iter()
+        .filter_map(|seq| match seq {
+            Sequence::Single(SeqOrUid::Value(v)) => Some(v.get()),
+            _ => None,
+        })
+        .collect()
+}
 
 /// Handle the UID FETCH command. Returns the email body as an IMAP
 /// literal.
 pub async fn handle_uid_fetch<S: AsyncRead + AsyncWrite + Unpin>(
     tag: &str,
-    rest: &str,
+    sequence_set: &SequenceSet,
     mailbox: &Mailbox,
     selected_folder: Option<&str>,
     stream: &mut BufReader<S>,
@@ -42,33 +58,27 @@ pub async fn handle_uid_fetch<S: AsyncRead + AsyncWrite + Unpin>(
         return;
     };
 
-    // Parse the UID from "UID FETCH <uid> (BODY.PEEK[])".
-    // The format from async-imap is: "UID FETCH 42 (BODY.PEEK[])"
-    let parts: Vec<&str> = rest.split_whitespace().collect();
-    // parts: ["UID", "FETCH", "42", "(BODY.PEEK[])"]
-    let uid: u32 = if parts.len() >= 3 {
-        parts[2].parse().unwrap_or(0)
-    } else {
-        0
-    };
+    let uids = extract_uids(sequence_set);
 
-    if let Some(email) = folder.emails.iter().find(|e| e.uid == uid) {
-        let body_len = email.raw.len();
+    for uid in uids {
+        if let Some(email) = folder.emails.iter().find(|e| e.uid == uid) {
+            let body_len = email.raw.len();
 
-        // Build the FETCH response with an IMAP literal.
-        let header = format!("* {uid} FETCH (UID {uid} BODY[] {{{body_len}}}\r\n");
-        if write_line(stream, &header).await.is_err() {
-            return;
-        }
+            let header = format!(
+                "* {uid} FETCH (UID {uid} BODY[] \
+                 {{{body_len}}}\r\n"
+            );
+            if write_line(stream, &header).await.is_err() {
+                return;
+            }
 
-        // Write the raw email bytes (the literal data).
-        if write_bytes(stream, &email.raw).await.is_err() {
-            return;
-        }
+            if write_bytes(stream, &email.raw).await.is_err() {
+                return;
+            }
 
-        // Close the FETCH response parenthesis.
-        if write_line(stream, ")\r\n").await.is_err() {
-            return;
+            if write_line(stream, ")\r\n").await.is_err() {
+                return;
+            }
         }
     }
 
@@ -80,17 +90,33 @@ pub async fn handle_uid_fetch<S: AsyncRead + AsyncWrite + Unpin>(
 mod tests {
     use super::*;
     use crate::fake_imap::mailbox::MailboxBuilder;
+    use std::num::NonZeroU32;
     use tokio::io::BufReader;
 
     fn make_raw_email() -> Vec<u8> {
         b"From: a@b.com\r\nSubject: Test\r\n\r\nBody".to_vec()
     }
 
-    async fn run(tag: &str, rest: &str, mailbox: &Mailbox, selected: Option<&str>) -> String {
+    fn uid_set(uid: u32) -> SequenceSet {
+        SequenceSet(
+            vec![Sequence::Single(SeqOrUid::Value(
+                NonZeroU32::new(uid).unwrap(),
+            ))]
+            .try_into()
+            .unwrap(),
+        )
+    }
+
+    async fn run(
+        tag: &str,
+        sequence_set: &SequenceSet,
+        mailbox: &Mailbox,
+        selected: Option<&str>,
+    ) -> String {
         let (client, server) = tokio::io::duplex(4096);
         let mut stream = BufReader::new(server);
 
-        handle_uid_fetch(tag, rest, mailbox, selected, &mut stream).await;
+        handle_uid_fetch(tag, sequence_set, mailbox, selected, &mut stream).await;
         drop(stream);
 
         let mut buf = Vec::new();
@@ -108,7 +134,7 @@ mod tests {
             .email(42, false, &raw)
             .build();
 
-        let output = run("A1", "UID FETCH 42 (BODY.PEEK[])", &mailbox, Some("INBOX")).await;
+        let output = run("A1", &uid_set(42), &mailbox, Some("INBOX")).await;
 
         assert!(output.contains("* 42 FETCH (UID 42 BODY[]"));
         assert!(output.contains("From: a@b.com"));
@@ -124,7 +150,7 @@ mod tests {
             .email(1, false, &raw)
             .build();
 
-        let output = run("A1", "UID FETCH 1 (BODY.PEEK[])", &mailbox, Some("INBOX")).await;
+        let output = run("A1", &uid_set(1), &mailbox, Some("INBOX")).await;
 
         let literal = format!("{{{expected_len}}}");
         assert!(output.contains(&literal));
@@ -134,7 +160,7 @@ mod tests {
     async fn missing_uid_returns_only_ok() {
         let mailbox = MailboxBuilder::new().folder("INBOX").build();
 
-        let output = run("A1", "UID FETCH 99 (BODY.PEEK[])", &mailbox, Some("INBOX")).await;
+        let output = run("A1", &uid_set(99), &mailbox, Some("INBOX")).await;
 
         assert!(!output.contains("FETCH (UID"));
         assert!(output.contains("A1 OK FETCH completed"));
@@ -144,7 +170,7 @@ mod tests {
     async fn no_folder_selected_returns_bad() {
         let mailbox = MailboxBuilder::new().folder("INBOX").build();
 
-        let output = run("A1", "UID FETCH 1 (BODY.PEEK[])", &mailbox, None).await;
+        let output = run("A1", &uid_set(1), &mailbox, None).await;
 
         assert!(output.contains("A1 BAD No folder selected"));
     }

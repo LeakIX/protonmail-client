@@ -9,7 +9,7 @@
 mod fake_imap;
 
 use fake_imap::{FakeImapServer, MailboxBuilder};
-use protonmail_client::{ImapConfig, ProtonClient};
+use protonmail_client::{Folder, ImapConfig, ProtonClient};
 
 /// Build a minimal valid RFC 2822 email.
 ///
@@ -75,7 +75,7 @@ async fn test_fetch_uid() {
     let server = FakeImapServer::start(mailbox).await;
     let client = client_for(&server);
 
-    let email = client.fetch_uid("INBOX", 42).await.unwrap();
+    let email = client.fetch_uid(&Folder::Inbox, 42).await.unwrap();
     assert_eq!(email.uid, 42);
     assert_eq!(email.from.address, "alice@example.com");
     assert_eq!(email.subject.original, "Hello Bob");
@@ -107,7 +107,7 @@ async fn test_fetch_unseen() {
     let server = FakeImapServer::start(mailbox).await;
     let client = client_for(&server);
 
-    let emails = client.fetch_unseen("INBOX").await.unwrap();
+    let emails = client.fetch_unseen(&Folder::Inbox).await.unwrap();
 
     // Only the unseen email should be returned.
     assert_eq!(emails.len(), 1);
@@ -141,7 +141,7 @@ async fn test_fetch_all() {
     let server = FakeImapServer::start(mailbox).await;
     let client = client_for(&server);
 
-    let emails = client.fetch_all("INBOX").await.unwrap();
+    let emails = client.fetch_all(&Folder::Inbox).await.unwrap();
     assert_eq!(emails.len(), 2);
 }
 
@@ -180,7 +180,7 @@ async fn test_fetch_last_n() {
     let client = client_for(&server);
 
     // Request the 2 most recent emails.
-    let emails = client.fetch_last_n("INBOX", 2).await.unwrap();
+    let emails = client.fetch_last_n(&Folder::Inbox, 2).await.unwrap();
     assert_eq!(emails.len(), 2);
 
     // fetch_last_n sorts descending by date, so newest first.
@@ -216,8 +216,55 @@ async fn test_search() {
 
     // Our fake server returns all UIDs for any non-UNSEEN query,
     // so an "ALL" search should return both.
-    let emails = client.search("INBOX", "ALL").await.unwrap();
+    let emails = client.search(&Folder::Inbox, "ALL").await.unwrap();
     assert_eq!(emails.len(), 2);
+}
+
+#[tokio::test]
+async fn test_fetch_date_range() {
+    let jan1 = make_raw_email(
+        "alice@example.com",
+        "bob@example.com",
+        "New Year",
+        "Happy new year!",
+        "Mon, 01 Jan 2024 10:00:00 +0000",
+    );
+    let jan10 = make_raw_email(
+        "charlie@example.com",
+        "bob@example.com",
+        "Mid January",
+        "Midway through the month.",
+        "Wed, 10 Jan 2024 10:00:00 +0000",
+    );
+    let jan20 = make_raw_email(
+        "dave@example.com",
+        "bob@example.com",
+        "Late January",
+        "Almost February.",
+        "Sat, 20 Jan 2024 10:00:00 +0000",
+    );
+
+    let mailbox = MailboxBuilder::new()
+        .folder("INBOX")
+        .email(1, true, &jan1)
+        .email(2, true, &jan10)
+        .email(3, true, &jan20)
+        .build();
+
+    let server = FakeImapServer::start(mailbox).await;
+    let client = client_for(&server);
+
+    // Range [Jan 5, Jan 15) should only include the Jan 10 email.
+    let since = chrono::NaiveDate::from_ymd_opt(2024, 1, 5).unwrap();
+    let before = chrono::NaiveDate::from_ymd_opt(2024, 1, 15).unwrap();
+    let emails = client
+        .fetch_date_range(&Folder::Inbox, since, before)
+        .await
+        .unwrap();
+
+    assert_eq!(emails.len(), 1);
+    assert_eq!(emails[0].from.address, "charlie@example.com");
+    assert_eq!(emails[0].subject.original, "Mid January");
 }
 
 #[tokio::test]
@@ -228,12 +275,12 @@ async fn test_empty_mailbox() {
     let client = client_for(&server);
 
     // All operations on an empty folder should return empty results.
-    let emails = client.fetch_all("INBOX").await.unwrap();
+    let emails = client.fetch_all(&Folder::Inbox).await.unwrap();
     assert!(emails.is_empty());
 
-    let emails = client.fetch_unseen("INBOX").await.unwrap();
+    let emails = client.fetch_unseen(&Folder::Inbox).await.unwrap();
     assert!(emails.is_empty());
 
-    let emails = client.fetch_last_n("INBOX", 5).await.unwrap();
+    let emails = client.fetch_last_n(&Folder::Inbox, 5).await.unwrap();
     assert!(emails.is_empty());
 }

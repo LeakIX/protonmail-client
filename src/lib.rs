@@ -11,8 +11,10 @@
 mod client;
 mod config;
 mod error;
+mod folder;
 
 pub use client::ProtonClient;
 pub use config::ImapConfig;
 pub use email_parser::Email;
 pub use error::{Error, Result};
+pub use folder::Folder;
