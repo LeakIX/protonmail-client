@@ -5,10 +5,16 @@
 //!
 //! TCP -> greeting -> STARTTLS -> TLS handshake -> LOGIN -> commands -> LOGOUT
 //!
-//! See `server.rs` for the protocol implementation with educational
-//! comments, and `mailbox.rs` for the test data model.
+//! ## Module layout
+//!
+//! - `server` -- TCP listener, TLS setup, and connection dispatch
+//! - `handlers/` -- one file per IMAP command (LIST, SELECT, etc.)
+//! - `mailbox` -- test data model (folders, emails, builder)
+//! - `io` -- shared write helpers
 
-mod mailbox;
+mod handlers;
+mod io;
+pub mod mailbox;
 mod server;
 
 pub use mailbox::MailboxBuilder;

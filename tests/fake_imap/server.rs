@@ -63,11 +63,15 @@
 //! This is how async-imap knows when the message body ends -- it reads
 //! exactly `bytecount` bytes, then expects the closing `)`.
 
+use super::handlers::{
+    handle_list, handle_login, handle_logout, handle_select, handle_uid_fetch, handle_uid_search,
+};
+use super::io::write_line;
 use super::mailbox::Mailbox;
 use rcgen::generate_simple_self_signed;
 use rustls::pki_types::PrivatePkcs8KeyDer;
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader};
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 
@@ -226,12 +230,20 @@ async fn handle_connection(
     //
     // After TLS is established, all communication is encrypted. The
     // client will now send LOGIN and then the real commands.
-    let mut tls_reader = BufReader::new(tls_stream);
+    handle_imap_session(tls_stream, mailbox).await;
+}
+
+/// Run the authenticated IMAP command loop over an established stream.
+///
+/// Dispatches each client command to the appropriate handler in
+/// `handlers/`.
+async fn handle_imap_session<S: AsyncRead + AsyncWrite + Unpin>(stream: S, mailbox: &Mailbox) {
+    let mut reader = BufReader::new(stream);
     let mut selected_folder: Option<String> = None;
 
     loop {
         let mut line = String::new();
-        match tls_reader.read_line(&mut line).await {
+        match reader.read_line(&mut line).await {
             Ok(0) | Err(_) => break, // Connection closed or error
             Ok(_) => {}
         }
@@ -257,296 +269,26 @@ async fn handle_connection(
         let upper = rest.to_uppercase();
 
         if upper.starts_with("LOGIN") {
-            // LOGIN username password
-            //
-            // In real IMAP, credentials are sent in plaintext over the
-            // (now encrypted) connection. We accept any credentials
-            // since this is a test server.
-            let resp = format!("{tag} OK LOGIN completed\r\n");
-            if write_line(&mut tls_reader, &resp).await.is_err() {
+            if !handle_login(tag, &mut reader).await {
                 break;
             }
         } else if upper.starts_with("LIST") {
-            // LIST reference mailbox-pattern
-            //
-            // Returns all folders matching the pattern. The format is:
-            //   * LIST (flags) delimiter "folder-name"
-            //
-            // Flags like \HasNoChildren tell the client about the
-            // folder's properties. The delimiter "/" is the hierarchy
-            // separator (e.g. "INBOX/subfolder").
-            handle_list(tag, mailbox, &mut tls_reader).await;
+            handle_list(tag, mailbox, &mut reader).await;
         } else if upper.starts_with("SELECT") {
-            // SELECT folder-name
-            //
-            // Opens a folder for reading. The server responds with
-            // metadata about the folder: how many messages exist,
-            // the UIDVALIDITY value (used to detect folder recreation),
-            // and flags.
-            selected_folder = handle_select(tag, rest, mailbox, &mut tls_reader).await;
+            selected_folder = handle_select(tag, rest, mailbox, &mut reader).await;
         } else if upper.starts_with("UID SEARCH") {
-            // UID SEARCH criteria
-            //
-            // Searches the selected folder and returns matching UIDs.
-            // Unlike plain SEARCH which returns sequence numbers, UID
-            // SEARCH returns UIDs that are stable across sessions.
-            handle_uid_search(
-                tag,
-                rest,
-                mailbox,
-                selected_folder.as_deref(),
-                &mut tls_reader,
-            )
-            .await;
+            handle_uid_search(tag, rest, mailbox, selected_folder.as_deref(), &mut reader).await;
         } else if upper.starts_with("UID FETCH") {
-            // UID FETCH uid-set (data-items)
-            //
-            // Fetches message data by UID. The response uses IMAP
-            // literals for binary-safe transfer of message bodies.
-            handle_uid_fetch(
-                tag,
-                rest,
-                mailbox,
-                selected_folder.as_deref(),
-                &mut tls_reader,
-            )
-            .await;
+            handle_uid_fetch(tag, rest, mailbox, selected_folder.as_deref(), &mut reader).await;
         } else if upper.starts_with("LOGOUT") {
-            // LOGOUT
-            //
-            // The server sends a BYE untagged response (indicating the
-            // connection is ending) followed by the tagged OK.
-            let _ = write_line(&mut tls_reader, "* BYE\r\n").await;
-            let resp = format!("{tag} OK LOGOUT completed\r\n");
-            let _ = write_line(&mut tls_reader, &resp).await;
+            handle_logout(tag, &mut reader).await;
             break;
         } else {
             // Unknown command -- respond with BAD.
             let resp = format!("{tag} BAD Unknown command\r\n");
-            if write_line(&mut tls_reader, &resp).await.is_err() {
+            if write_line(&mut reader, &resp).await.is_err() {
                 break;
             }
         }
     }
-}
-
-/// Handle the LIST command.
-///
-/// Responds with one `* LIST` line per folder, followed by the
-/// tagged OK. The format follows RFC 3501 Section 7.2.2:
-///
-/// ```text
-/// * LIST (\HasNoChildren) "/" "INBOX"
-/// * LIST (\HasNoChildren) "/" "Sent"
-/// A0002 OK LIST completed
-/// ```
-async fn handle_list<S: AsyncRead + AsyncWrite + Unpin>(
-    tag: &str,
-    mailbox: &Mailbox,
-    stream: &mut BufReader<S>,
-) {
-    for folder in &mailbox.folders {
-        let line = format!("* LIST (\\HasNoChildren) \"/\" \"{}\"\r\n", folder.name);
-        if write_line(stream, &line).await.is_err() {
-            return;
-        }
-    }
-    let resp = format!("{tag} OK LIST completed\r\n");
-    let _ = write_line(stream, &resp).await;
-}
-
-/// Handle the SELECT command.
-///
-/// Opens a folder and responds with metadata. The key pieces are:
-///
-/// - `* N EXISTS` -- total number of messages in the folder.
-/// - `* OK [UIDVALIDITY V]` -- a value that changes if the folder's
-///   UID space is reset (e.g. the folder was deleted and recreated).
-///   Clients use this to invalidate their UID caches.
-///
-/// Returns the selected folder name (or None if not found).
-async fn handle_select<S: AsyncRead + AsyncWrite + Unpin>(
-    tag: &str,
-    rest: &str,
-    mailbox: &Mailbox,
-    stream: &mut BufReader<S>,
-) -> Option<String> {
-    // Extract folder name: "SELECT INBOX" or "SELECT \"INBOX\""
-    let folder_name = rest.split_once(' ').map_or("", |x| x.1).trim_matches('"');
-
-    if let Some(folder) = mailbox.get_folder(folder_name) {
-        let exists = format!("* {} EXISTS\r\n", folder.emails.len());
-        let _ = write_line(stream, &exists).await;
-        let _ = write_line(stream, "* OK [UIDVALIDITY 1]\r\n").await;
-        let resp = format!("{tag} OK [READ-WRITE] SELECT completed\r\n");
-        let _ = write_line(stream, &resp).await;
-        Some(folder_name.to_string())
-    } else {
-        let resp = format!("{tag} NO Folder not found\r\n");
-        let _ = write_line(stream, &resp).await;
-        None
-    }
-}
-
-/// Handle the UID SEARCH command.
-///
-/// Parses the search criteria and returns matching UIDs. We support:
-///
-/// - `ALL` -- returns every UID in the selected folder
-/// - `UNSEEN` -- returns UIDs without the `\Seen` flag
-/// - `SINCE <date> BEFORE <date>` -- we return all UIDs (date
-///   filtering would require parsing the email Date header, which
-///   is overkill for our tests)
-///
-/// The response format (RFC 3501 Section 7.2.5):
-/// ```text
-/// * SEARCH 1 2 3
-/// A0003 OK SEARCH completed
-/// ```
-async fn handle_uid_search<S: AsyncRead + AsyncWrite + Unpin>(
-    tag: &str,
-    rest: &str,
-    mailbox: &Mailbox,
-    selected_folder: Option<&str>,
-    stream: &mut BufReader<S>,
-) {
-    let Some(folder_name) = selected_folder else {
-        let resp = format!("{tag} BAD No folder selected\r\n");
-        let _ = write_line(stream, &resp).await;
-        return;
-    };
-
-    let Some(folder) = mailbox.get_folder(folder_name) else {
-        let resp = format!("{tag} BAD Folder not found\r\n");
-        let _ = write_line(stream, &resp).await;
-        return;
-    };
-
-    // Extract the search criteria after "UID SEARCH ".
-    let criteria = rest
-        .strip_prefix("UID SEARCH ")
-        .or_else(|| rest.strip_prefix("uid search "))
-        .unwrap_or(rest)
-        .to_uppercase();
-
-    let uids: Vec<u32> = if criteria.contains("UNSEEN") {
-        // UNSEEN: only emails without the \Seen flag
-        folder
-            .emails
-            .iter()
-            .filter(|e| !e.seen)
-            .map(|e| e.uid)
-            .collect()
-    } else {
-        // ALL, SINCE/BEFORE, or anything else: return all UIDs.
-        // Real IMAP servers would parse dates, but for testing
-        // we just return everything.
-        folder.emails.iter().map(|e| e.uid).collect()
-    };
-
-    // Format: "* SEARCH uid1 uid2 uid3\r\n"
-    // If no results, still send "* SEARCH\r\n" (empty result set).
-    let uid_str: Vec<String> = uids.iter().map(ToString::to_string).collect();
-    let search_line = format!("* SEARCH {}\r\n", uid_str.join(" "));
-    let _ = write_line(stream, &search_line).await;
-    let resp = format!("{tag} OK SEARCH completed\r\n");
-    let _ = write_line(stream, &resp).await;
-}
-
-/// Handle the UID FETCH command.
-///
-/// This is the most complex IMAP response because it uses **counted
-/// literals** to transfer message bodies. The format is:
-///
-/// ```text
-/// * <seq> FETCH (UID <uid> BODY[] {<length>}
-/// <exactly length bytes of raw RFC 2822 message>
-/// )
-/// ```
-///
-/// The `{length}\r\n` is an IMAP literal marker. It tells the client:
-/// "the next `length` bytes are raw data, not IMAP protocol text."
-/// After reading those bytes, the client expects the closing `)`.
-///
-/// We use the sequence number equal to the UID for simplicity (in real
-/// IMAP, sequence numbers are assigned per-session based on the order
-/// messages appear in the folder).
-async fn handle_uid_fetch<S: AsyncRead + AsyncWrite + Unpin>(
-    tag: &str,
-    rest: &str,
-    mailbox: &Mailbox,
-    selected_folder: Option<&str>,
-    stream: &mut BufReader<S>,
-) {
-    let Some(folder_name) = selected_folder else {
-        let resp = format!("{tag} BAD No folder selected\r\n");
-        let _ = write_line(stream, &resp).await;
-        return;
-    };
-
-    let Some(folder) = mailbox.get_folder(folder_name) else {
-        let resp = format!("{tag} BAD Folder not found\r\n");
-        let _ = write_line(stream, &resp).await;
-        return;
-    };
-
-    // Parse the UID from "UID FETCH <uid> (BODY.PEEK[])".
-    // The format from async-imap is: "UID FETCH 42 (BODY.PEEK[])"
-    let parts: Vec<&str> = rest.split_whitespace().collect();
-    // parts: ["UID", "FETCH", "42", "(BODY.PEEK[])"]
-    let uid: u32 = if parts.len() >= 3 {
-        parts[2].parse().unwrap_or(0)
-    } else {
-        0
-    };
-
-    if let Some(email) = folder.emails.iter().find(|e| e.uid == uid) {
-        let body_len = email.raw.len();
-
-        // Build the FETCH response with an IMAP literal.
-        //
-        // The literal `{N}\r\n` tells the client that the next N
-        // bytes are raw data. After those bytes, we send `)\r\n`
-        // to close the FETCH response.
-        //
-        // Real IMAP servers also return FLAGS, INTERNALDATE, etc.
-        // async-imap only needs UID and BODY[] for our use case.
-        let header = format!("* {uid} FETCH (UID {uid} BODY[] {{{body_len}}}\r\n");
-        if write_line(stream, &header).await.is_err() {
-            return;
-        }
-
-        // Write the raw email bytes. This is the literal data --
-        // exactly body_len bytes, no escaping, no line ending
-        // interpretation.
-        if write_bytes(stream, &email.raw).await.is_err() {
-            return;
-        }
-
-        // Close the FETCH response parenthesis.
-        if write_line(stream, ")\r\n").await.is_err() {
-            return;
-        }
-    }
-
-    let resp = format!("{tag} OK FETCH completed\r\n");
-    let _ = write_line(stream, &resp).await;
-}
-
-/// Write a string to the stream and flush.
-async fn write_line<S: AsyncRead + AsyncWrite + Unpin>(
-    stream: &mut BufReader<S>,
-    line: &str,
-) -> std::io::Result<()> {
-    stream.get_mut().write_all(line.as_bytes()).await?;
-    stream.get_mut().flush().await
-}
-
-/// Write raw bytes to the stream and flush.
-async fn write_bytes<S: AsyncRead + AsyncWrite + Unpin>(
-    stream: &mut BufReader<S>,
-    data: &[u8],
-) -> std::io::Result<()> {
-    stream.get_mut().write_all(data).await?;
-    stream.get_mut().flush().await
 }
