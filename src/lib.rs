@@ -1,8 +1,3 @@
-#![deny(clippy::all)]
-#![warn(clippy::pedantic)]
-#![warn(clippy::nursery)]
-#![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
-
 //! Proton Mail IMAP client library
 //!
 //! An interface to fetch emails from Proton Mail using
