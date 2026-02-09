@@ -20,6 +20,36 @@
 //! // Read-write client -- all methods are available.
 //! let writer: ProtonClient<ReadWrite> = ProtonClient::new(cfg);
 //! ```
+//!
+//! A read-only client cannot call write operations — this fails to
+//! compile:
+//!
+//! ```compile_fail
+//! use protonmail_client::{Flag, Folder, ImapConfig, ProtonClient};
+//!
+//! let cfg = ImapConfig::from_env().unwrap();
+//! let client: ProtonClient = ProtonClient::new(cfg);
+//! // ERROR: no method named `add_flag` found for `ProtonClient<ReadOnly>`
+//! let _ = client.add_flag(1, &Folder::Inbox, &Flag::Seen);
+//! ```
+//!
+//! ```compile_fail
+//! use protonmail_client::{Folder, ImapConfig, ProtonClient};
+//!
+//! let cfg = ImapConfig::from_env().unwrap();
+//! let client: ProtonClient = ProtonClient::new(cfg);
+//! // ERROR: no method named `move_to_folder` found for `ProtonClient<ReadOnly>`
+//! let _ = client.move_to_folder(1, &Folder::Inbox, &Folder::Trash);
+//! ```
+//!
+//! ```compile_fail
+//! use protonmail_client::{Folder, ImapConfig, ProtonClient};
+//!
+//! let cfg = ImapConfig::from_env().unwrap();
+//! let client: ProtonClient = ProtonClient::new(cfg);
+//! // ERROR: no method named `archive` found for `ProtonClient<ReadOnly>`
+//! let _ = client.archive(1, &Folder::Inbox);
+//! ```
 
 use std::marker::PhantomData;
 

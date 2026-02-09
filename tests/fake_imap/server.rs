@@ -64,8 +64,9 @@
 //! exactly `bytecount` bytes, then expects the closing `)`.
 
 use super::handlers::{
-    handle_capability, handle_expunge, handle_list, handle_login, handle_logout, handle_noop,
-    handle_select, handle_uid_copy, handle_uid_fetch, handle_uid_search, handle_uid_store,
+    StoreArgs, handle_capability, handle_expunge, handle_list, handle_login, handle_logout,
+    handle_noop, handle_select, handle_uid_copy, handle_uid_fetch, handle_uid_search,
+    handle_uid_store,
 };
 use super::io::write_line;
 use super::mailbox::Mailbox;
@@ -235,7 +236,6 @@ fn mailbox_name(mb: &ImapMailbox<'_>) -> String {
 /// Read handlers receive a snapshot (`Mailbox` clone) taken under
 /// lock. Write handlers receive `&Mutex<Mailbox>` and lock briefly
 /// to mutate state.
-#[allow(clippy::too_many_lines)]
 async fn handle_imap_session<S: AsyncRead + AsyncWrite + Unpin>(
     stream: S,
     mailbox: &Mutex<Mailbox>,
@@ -267,108 +267,122 @@ async fn handle_imap_session<S: AsyncRead + AsyncWrite + Unpin>(
             continue;
         };
 
-        let tag = command.tag.inner();
+        let result = dispatch_command(
+            &command.body,
+            command.tag.inner(),
+            mailbox,
+            &mut selected_folder,
+            &mut reader,
+        )
+        .await;
 
-        // Take a snapshot for read-only handlers.
-        let snap = mailbox.lock().unwrap().clone();
+        if !result {
+            break;
+        }
+    }
+}
 
-        match command.body {
-            CommandBody::Capability => {
-                handle_capability(tag, &mut reader).await;
+/// Dispatch a single parsed IMAP command to the appropriate handler.
+///
+/// Returns `false` if the session should end (LOGOUT or I/O error).
+async fn dispatch_command<S: AsyncRead + AsyncWrite + Unpin>(
+    body: &CommandBody<'_>,
+    tag: &str,
+    mailbox: &Mutex<Mailbox>,
+    selected_folder: &mut Option<String>,
+    reader: &mut BufReader<S>,
+) -> bool {
+    // Take a snapshot for read-only handlers.
+    let snap = mailbox.lock().unwrap().clone();
+
+    match *body {
+        CommandBody::Capability => {
+            handle_capability(tag, reader).await;
+        }
+        CommandBody::Noop => {
+            handle_noop(tag, reader).await;
+        }
+        CommandBody::Login { .. } => {
+            if !handle_login(tag, reader).await {
+                return false;
             }
-            CommandBody::Noop => {
-                handle_noop(tag, &mut reader).await;
-            }
-            CommandBody::Login { .. } => {
-                if !handle_login(tag, &mut reader).await {
-                    break;
-                }
-            }
-            CommandBody::List { .. } => {
-                handle_list(tag, &snap, &mut reader).await;
-            }
-            CommandBody::Select { mailbox: mb, .. } => {
-                let name = mailbox_name(&mb);
-                selected_folder = handle_select(tag, &name, &snap, &mut reader).await;
-            }
-            CommandBody::Search {
-                criteria,
-                uid: true,
-                ..
-            } => {
-                handle_uid_search(
-                    tag,
-                    criteria.as_ref(),
-                    &snap,
-                    selected_folder.as_deref(),
-                    &mut reader,
-                )
-                .await;
-            }
-            CommandBody::Fetch {
+        }
+        CommandBody::List { .. } => {
+            handle_list(tag, &snap, reader).await;
+        }
+        CommandBody::Select {
+            mailbox: ref mb, ..
+        } => {
+            let name = mailbox_name(mb);
+            *selected_folder = handle_select(tag, &name, &snap, reader).await;
+        }
+        CommandBody::Search {
+            ref criteria,
+            uid: true,
+            ..
+        } => {
+            handle_uid_search(
+                tag,
+                criteria.as_ref(),
+                &snap,
+                selected_folder.as_deref(),
+                reader,
+            )
+            .await;
+        }
+        CommandBody::Fetch {
+            ref sequence_set,
+            uid: true,
+            ..
+        } => {
+            handle_uid_fetch(tag, sequence_set, &snap, selected_folder.as_deref(), reader).await;
+        }
+        CommandBody::Store {
+            ref sequence_set,
+            uid: true,
+            ref kind,
+            ref response,
+            ref flags,
+            ..
+        } => {
+            let args = StoreArgs {
                 sequence_set,
-                uid: true,
-                ..
-            } => {
-                handle_uid_fetch(
-                    tag,
-                    &sequence_set,
-                    &snap,
-                    selected_folder.as_deref(),
-                    &mut reader,
-                )
-                .await;
-            }
-            CommandBody::Store {
-                ref sequence_set,
-                uid: true,
-                ref kind,
-                ref response,
-                ref flags,
-                ..
-            } => {
-                handle_uid_store(
-                    tag,
-                    sequence_set,
-                    kind,
-                    response,
-                    flags,
-                    mailbox,
-                    selected_folder.as_deref(),
-                    &mut reader,
-                )
-                .await;
-            }
-            CommandBody::Copy {
-                ref sequence_set,
-                mailbox: ref dest_mb,
-                uid: true,
-                ..
-            } => {
-                let dest_name = mailbox_name(dest_mb);
-                handle_uid_copy(
-                    tag,
-                    sequence_set,
-                    &dest_name,
-                    mailbox,
-                    selected_folder.as_deref(),
-                    &mut reader,
-                )
-                .await;
-            }
-            CommandBody::Expunge => {
-                handle_expunge(tag, mailbox, selected_folder.as_deref(), &mut reader).await;
-            }
-            CommandBody::Logout => {
-                handle_logout(tag, &mut reader).await;
-                break;
-            }
-            _ => {
-                let resp = format!("{tag} BAD Unknown command\r\n");
-                if write_line(&mut reader, &resp).await.is_err() {
-                    break;
-                }
+                kind,
+                response,
+                flags,
+            };
+            handle_uid_store(tag, &args, mailbox, selected_folder.as_deref(), reader).await;
+        }
+        CommandBody::Copy {
+            ref sequence_set,
+            mailbox: ref dest_mb,
+            uid: true,
+            ..
+        } => {
+            let dest_name = mailbox_name(dest_mb);
+            handle_uid_copy(
+                tag,
+                sequence_set,
+                &dest_name,
+                mailbox,
+                selected_folder.as_deref(),
+                reader,
+            )
+            .await;
+        }
+        CommandBody::Expunge => {
+            handle_expunge(tag, mailbox, selected_folder.as_deref(), reader).await;
+        }
+        CommandBody::Logout => {
+            handle_logout(tag, reader).await;
+            return false;
+        }
+        _ => {
+            let resp = format!("{tag} BAD Unknown command\r\n");
+            if write_line(reader, &resp).await.is_err() {
+                return false;
             }
         }
     }
+    true
 }

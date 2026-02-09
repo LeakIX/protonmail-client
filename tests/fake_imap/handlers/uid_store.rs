@@ -46,14 +46,18 @@ fn extract_uids(seq_set: &SequenceSet, max_uid: u32) -> Vec<u32> {
     uids
 }
 
+/// Parsed STORE command arguments.
+pub struct StoreArgs<'a> {
+    pub sequence_set: &'a SequenceSet,
+    pub kind: &'a StoreType,
+    pub response: &'a StoreResponse,
+    pub flags: &'a [Flag<'a>],
+}
+
 /// Handle the UID STORE command. Modifies flags on matching emails.
-#[allow(clippy::too_many_arguments)]
 pub async fn handle_uid_store<S: AsyncRead + AsyncWrite + Unpin>(
     tag: &str,
-    sequence_set: &SequenceSet,
-    kind: &StoreType,
-    response: &StoreResponse,
-    flags: &[Flag<'_>],
+    args: &StoreArgs<'_>,
     mailbox: &Mutex<Mailbox>,
     selected_folder: Option<&str>,
     stream: &mut BufReader<S>,
@@ -65,8 +69,8 @@ pub async fn handle_uid_store<S: AsyncRead + AsyncWrite + Unpin>(
     };
 
     // Determine which flags the client wants to set/unset.
-    let wants_seen = flags.iter().any(|f| matches!(f, Flag::Seen));
-    let wants_deleted = flags.iter().any(|f| matches!(f, Flag::Deleted));
+    let wants_seen = args.flags.iter().any(|f| matches!(f, Flag::Seen));
+    let wants_deleted = args.flags.iter().any(|f| matches!(f, Flag::Deleted));
 
     // Check folder exists (quick lock, no await).
     let folder_exists = {
@@ -85,7 +89,7 @@ pub async fn handle_uid_store<S: AsyncRead + AsyncWrite + Unpin>(
         let folder = mb.get_folder_mut(folder_name).unwrap();
 
         let max_uid = folder.emails.iter().map(|e| e.uid).max().unwrap_or(0);
-        let uids = extract_uids(sequence_set, max_uid);
+        let uids = extract_uids(args.sequence_set, max_uid);
 
         let mut results: Vec<(usize, u32, Vec<String>)> = Vec::new();
 
@@ -96,7 +100,7 @@ pub async fn handle_uid_store<S: AsyncRead + AsyncWrite + Unpin>(
                 .enumerate()
                 .find(|(_, e)| e.uid == uid)
             {
-                match kind {
+                match args.kind {
                     StoreType::Add => {
                         if wants_seen {
                             email.seen = true;
@@ -136,7 +140,7 @@ pub async fn handle_uid_store<S: AsyncRead + AsyncWrite + Unpin>(
     };
 
     // Send FETCH responses outside the lock.
-    if !matches!(response, StoreResponse::Silent) {
+    if !matches!(args.response, StoreResponse::Silent) {
         for (seq, uid, flags_list) in &results {
             let flags_str = flags_list.join(" ");
             let line = format!(
@@ -187,17 +191,13 @@ mod tests {
         let (client, server) = tokio::io::duplex(4096);
         let mut stream = BufReader::new(server);
 
-        handle_uid_store(
-            tag,
-            seq,
+        let args = StoreArgs {
+            sequence_set: seq,
             kind,
             response,
             flags,
-            mailbox,
-            selected,
-            &mut stream,
-        )
-        .await;
+        };
+        handle_uid_store(tag, &args, mailbox, selected, &mut stream).await;
         drop(stream);
 
         let mut buf = Vec::new();
@@ -208,7 +208,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[allow(clippy::significant_drop_tightening)]
+
     async fn add_seen_flag() {
         let raw = make_raw_email();
         let mb = Mutex::new(
@@ -233,12 +233,10 @@ mod tests {
         assert!(output.contains("A1 OK STORE completed"));
 
         // Verify mutation persisted.
-        let locked = mb.lock().unwrap();
-        assert!(locked.get_folder("INBOX").unwrap().emails[0].seen);
+        assert!(mb.lock().unwrap().get_folder("INBOX").unwrap().emails[0].seen);
     }
 
     #[tokio::test]
-    #[allow(clippy::significant_drop_tightening)]
     async fn remove_seen_flag() {
         let raw = make_raw_email();
         let mb = Mutex::new(
@@ -259,12 +257,10 @@ mod tests {
         )
         .await;
 
-        let locked = mb.lock().unwrap();
-        assert!(!locked.get_folder("INBOX").unwrap().emails[0].seen);
+        assert!(!mb.lock().unwrap().get_folder("INBOX").unwrap().emails[0].seen);
     }
 
     #[tokio::test]
-    #[allow(clippy::significant_drop_tightening)]
     async fn add_deleted_flag() {
         let raw = make_raw_email();
         let mb = Mutex::new(
@@ -285,8 +281,7 @@ mod tests {
         )
         .await;
 
-        let locked = mb.lock().unwrap();
-        assert!(locked.get_folder("INBOX").unwrap().emails[0].deleted);
+        assert!(mb.lock().unwrap().get_folder("INBOX").unwrap().emails[0].deleted);
     }
 
     #[tokio::test]

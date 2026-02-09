@@ -127,7 +127,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[allow(clippy::significant_drop_tightening)]
+
     async fn copies_email_to_destination() {
         let raw = make_raw_email();
         let mb = Mutex::new(
@@ -142,14 +142,22 @@ mod tests {
 
         assert!(output.contains("A1 OK COPY completed"));
 
-        let locked = mb.lock().unwrap();
-        let archive = locked.get_folder("Archive").unwrap();
-        assert_eq!(archive.emails.len(), 1);
-        assert_eq!(archive.emails[0].uid, 1);
+        assert_eq!(
+            mb.lock()
+                .unwrap()
+                .get_folder("Archive")
+                .unwrap()
+                .emails
+                .len(),
+            1
+        );
+        assert_eq!(
+            mb.lock().unwrap().get_folder("Archive").unwrap().emails[0].uid,
+            1
+        );
     }
 
     #[tokio::test]
-    #[allow(clippy::significant_drop_tightening)]
     async fn source_email_remains() {
         let raw = make_raw_email();
         let mb = Mutex::new(
@@ -162,9 +170,10 @@ mod tests {
 
         let _output = run_copy("A1", &uid_set(1), "Trash", &mb, Some("INBOX")).await;
 
-        let locked = mb.lock().unwrap();
-        let inbox = locked.get_folder("INBOX").unwrap();
-        assert_eq!(inbox.emails.len(), 1);
+        assert_eq!(
+            mb.lock().unwrap().get_folder("INBOX").unwrap().emails.len(),
+            1
+        );
     }
 
     #[tokio::test]

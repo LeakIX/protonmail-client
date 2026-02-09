@@ -103,7 +103,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[allow(clippy::significant_drop_tightening)]
+
     async fn removes_deleted_emails() {
         let raw = make_raw_email();
         let mut mb = MailboxBuilder::new()
@@ -121,14 +121,17 @@ mod tests {
         assert!(output.contains("* 1 EXPUNGE"));
         assert!(output.contains("A1 OK EXPUNGE completed"));
 
-        let locked = mb.lock().unwrap();
-        let inbox = locked.get_folder("INBOX").unwrap();
-        assert_eq!(inbox.emails.len(), 1);
-        assert_eq!(inbox.emails[0].uid, 2);
+        assert_eq!(
+            mb.lock().unwrap().get_folder("INBOX").unwrap().emails.len(),
+            1
+        );
+        assert_eq!(
+            mb.lock().unwrap().get_folder("INBOX").unwrap().emails[0].uid,
+            2
+        );
     }
 
     #[tokio::test]
-    #[allow(clippy::significant_drop_tightening)]
     async fn no_deleted_emails_is_noop() {
         let raw = make_raw_email();
         let mb = Mutex::new(
@@ -143,8 +146,10 @@ mod tests {
         assert!(!output.contains("EXPUNGE\r\n"));
         assert!(output.contains("A1 OK EXPUNGE completed"));
 
-        let locked = mb.lock().unwrap();
-        assert_eq!(locked.get_folder("INBOX").unwrap().emails.len(), 1);
+        assert_eq!(
+            mb.lock().unwrap().get_folder("INBOX").unwrap().emails.len(),
+            1
+        );
     }
 
     #[tokio::test]
@@ -157,7 +162,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[allow(clippy::significant_drop_tightening)]
     async fn multiple_deletions() {
         let raw = make_raw_email();
         let mb = Mutex::new(Mailbox {
@@ -192,9 +196,13 @@ mod tests {
         assert!(output.contains("EXPUNGE"));
         assert!(output.contains("A1 OK EXPUNGE completed"));
 
-        let locked = mb.lock().unwrap();
-        let inbox = locked.get_folder("INBOX").unwrap();
-        assert_eq!(inbox.emails.len(), 1);
-        assert_eq!(inbox.emails[0].uid, 2);
+        assert_eq!(
+            mb.lock().unwrap().get_folder("INBOX").unwrap().emails.len(),
+            1
+        );
+        assert_eq!(
+            mb.lock().unwrap().get_folder("INBOX").unwrap().emails[0].uid,
+            2
+        );
     }
 }

@@ -26,4 +26,4 @@ pub use select::handle_select;
 pub use uid_copy::handle_uid_copy;
 pub use uid_fetch::handle_uid_fetch;
 pub use uid_search::handle_uid_search;
-pub use uid_store::handle_uid_store;
+pub use uid_store::{StoreArgs, handle_uid_store};
