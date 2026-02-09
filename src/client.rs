@@ -59,7 +59,7 @@ use crate::error::{Error, Result};
 use crate::flag::Flag;
 use crate::folder::Folder;
 use chrono::NaiveDate;
-use email_parser::{Email, parse_email};
+use email_extract::{Email, parse_email};
 use futures::{StreamExt, pin_mut};
 use tracing::{info, warn};
 

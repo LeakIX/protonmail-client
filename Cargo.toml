@@ -8,7 +8,7 @@ description = "IMAP client library for Proton Mail via Proton Bridge"
 repository = "https://github.com/LeakIX/protonmail-client"
 
 [dependencies]
-email-parser = { git = "https://github.com/LeakIX/email-parser.git" }
+email-extract = "0.1.0"
 
 # Async runtime
 tokio = { version = "1.44", features = ["full"] }

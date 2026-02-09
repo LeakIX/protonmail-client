@@ -13,7 +13,7 @@
 //! - `ProtonClient<ReadWrite>` -- all of the above **plus** move,
 //!   flag, archive, and unmark
 //!
-//! Returns parsed [`Email`] structs from the [`email_parser`] crate.
+//! Returns parsed [`Email`] structs from the [`email_extract`] crate.
 
 mod client;
 mod config;
@@ -24,7 +24,7 @@ mod folder;
 
 pub use client::{ProtonClient, ReadOnly, ReadWrite};
 pub use config::ImapConfig;
-pub use email_parser::Email;
+pub use email_extract::Email;
 pub use error::{Error, Result};
 pub use flag::Flag;
 pub use folder::Folder;
