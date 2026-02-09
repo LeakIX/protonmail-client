@@ -62,7 +62,7 @@ pub struct MailboxBuilder {
 }
 
 impl MailboxBuilder {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             folders: Vec::new(),
         }

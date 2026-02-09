@@ -27,6 +27,10 @@ impl ProtonClient {
     }
 
     /// List all available IMAP folders
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection or LIST command fails.
     pub async fn list_folders(&self) -> Result<Vec<String>> {
         let mut session = self.connect().await?;
 
@@ -48,6 +52,11 @@ impl ProtonClient {
     }
 
     /// Fetch a single email by UID from a folder
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection, SELECT, or FETCH fails,
+    /// or if the message body cannot be parsed.
     pub async fn fetch_uid(&self, folder: &str, uid: u32) -> Result<Email> {
         let mut session = self.connect().await?;
         self.select(&mut session, folder).await?;
@@ -59,16 +68,29 @@ impl ProtonClient {
     }
 
     /// Fetch all unseen emails from a folder
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection, SELECT, or SEARCH fails.
     pub async fn fetch_unseen(&self, folder: &str) -> Result<Vec<Email>> {
         self.search(folder, "UNSEEN").await
     }
 
     /// Fetch all emails from a folder
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection, SELECT, or SEARCH fails.
     pub async fn fetch_all(&self, folder: &str) -> Result<Vec<Email>> {
         self.search(folder, "ALL").await
     }
 
     /// Fetch the N most recent emails from a folder
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection, SELECT, SEARCH, or
+    /// FETCH fails.
     pub async fn fetch_last_n(&self, folder: &str, n: usize) -> Result<Vec<Email>> {
         let mut session = self.connect().await?;
         self.select(&mut session, folder).await?;
@@ -101,6 +123,10 @@ impl ProtonClient {
     /// Fetch emails within a date range from a folder
     ///
     /// IMAP semantics: SINCE >= date, BEFORE < date.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection, SELECT, or SEARCH fails.
     pub async fn fetch_date_range(
         &self,
         folder: &str,
@@ -117,6 +143,10 @@ impl ProtonClient {
     }
 
     /// Search emails using an arbitrary IMAP search query
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the connection, SELECT, or SEARCH fails.
     pub async fn search(&self, folder: &str, query: &str) -> Result<Vec<Email>> {
         let mut session = self.connect().await?;
         self.select(&mut session, folder).await?;

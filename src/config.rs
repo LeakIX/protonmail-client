@@ -22,6 +22,11 @@ impl ImapConfig {
     /// Optional (with defaults):
     /// - `IMAP_HOST` (default: `127.0.0.1`)
     /// - `IMAP_PORT` (default: `1143`)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if required environment variables are
+    /// missing or `IMAP_PORT` is not a valid port number.
     pub fn from_env() -> Result<Self> {
         dotenvy::dotenv().ok();
 

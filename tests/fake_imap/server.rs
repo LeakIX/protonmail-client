@@ -112,7 +112,7 @@ impl FakeImapServer {
         let cert = generate_simple_self_signed(vec!["127.0.0.1".to_string()])
             .expect("generate self-signed cert");
 
-        let cert_der = rustls::pki_types::CertificateDer::from(cert.cert.der().clone());
+        let cert_der = cert.cert.der().clone();
         let key_der = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
 
         // Build a rustls ServerConfig with the generated cert.
@@ -149,7 +149,7 @@ impl FakeImapServer {
     }
 
     /// The port the server is listening on.
-    pub fn port(&self) -> u16 {
+    pub const fn port(&self) -> u16 {
         self.port
     }
 }
@@ -372,7 +372,7 @@ async fn handle_select<S: AsyncRead + AsyncWrite + Unpin>(
     stream: &mut BufReader<S>,
 ) -> Option<String> {
     // Extract folder name: "SELECT INBOX" or "SELECT \"INBOX\""
-    let folder_name = rest.splitn(2, ' ').nth(1).unwrap_or("").trim_matches('"');
+    let folder_name = rest.split_once(' ').map_or("", |x| x.1).trim_matches('"');
 
     if let Some(folder) = mailbox.get_folder(folder_name) {
         let exists = format!("* {} EXISTS\r\n", folder.emails.len());

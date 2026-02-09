@@ -1,3 +1,5 @@
+#![allow(clippy::similar_names)]
+
 //! Integration tests for `ProtonClient` using the fake IMAP server.
 //!
 //! Each test constructs a `Mailbox` with test data, starts a

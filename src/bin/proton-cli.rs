@@ -1,8 +1,3 @@
-#![deny(clippy::all)]
-#![warn(clippy::pedantic)]
-#![warn(clippy::nursery)]
-#![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
-
 //! CLI for querying Proton Mail via Proton Bridge (read-only)
 
 use chrono::NaiveDate;
