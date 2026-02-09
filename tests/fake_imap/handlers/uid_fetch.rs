@@ -13,9 +13,8 @@
 //! "the next `length` bytes are raw data, not IMAP protocol text."
 //! After reading those bytes, the client expects the closing `)`.
 //!
-//! We use the sequence number equal to the UID for simplicity (in real
-//! IMAP, sequence numbers are assigned per-session based on the order
-//! messages appear in the folder).
+//! The sequence number is the 1-based index of the message within the
+//! folder, per RFC 3501 Section 7.4.2.
 
 use crate::fake_imap::io::{write_bytes, write_line};
 use crate::fake_imap::mailbox::Mailbox;
@@ -61,11 +60,12 @@ pub async fn handle_uid_fetch<S: AsyncRead + AsyncWrite + Unpin>(
     let uids = extract_uids(sequence_set);
 
     for uid in uids {
-        if let Some(email) = folder.emails.iter().find(|e| e.uid == uid) {
+        if let Some((idx, email)) = folder.emails.iter().enumerate().find(|(_, e)| e.uid == uid) {
+            let seq = idx + 1; // 1-based sequence number
             let body_len = email.raw.len();
 
             let header = format!(
-                "* {uid} FETCH (UID {uid} BODY[] \
+                "* {seq} FETCH (UID {uid} BODY[] \
                  {{{body_len}}}\r\n"
             );
             if write_line(stream, &header).await.is_err() {
@@ -136,7 +136,8 @@ mod tests {
 
         let output = run("A1", &uid_set(42), &mailbox, Some("INBOX")).await;
 
-        assert!(output.contains("* 42 FETCH (UID 42 BODY[]"));
+        // Sequence number is 1 (1st message), UID is 42
+        assert!(output.contains("* 1 FETCH (UID 42 BODY[]"));
         assert!(output.contains("From: a@b.com"));
         assert!(output.contains("A1 OK FETCH completed"));
     }
