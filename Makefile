@@ -13,15 +13,15 @@ help: ## Ask for help!
 
 .PHONY: build
 build: ## Build the project in debug mode
-	cargo build
+	cargo build --all-features
 
 .PHONY: build-release
 build-release: ## Build the project in release mode
-	cargo build --release
+	cargo build --all-features --release
 
 .PHONY: check
 check: ## Check code for compilation errors
-	cargo check
+	cargo check --all-features
 
 .PHONY: check-format
 check-format: ## Check code formatting
@@ -41,15 +41,15 @@ format-toml: ## Format TOML files
 
 .PHONY: lint
 lint: ## Run linter
-	cargo clippy -- -D warnings
+	cargo clippy --all-features -- -D warnings
 
 .PHONY: test
 test: ## Run tests
-	cargo test
+	cargo test --all-features
 
 .PHONY: test-verbose
 test-verbose: ## Run tests with verbose output
-	cargo test -- --nocapture
+	cargo test --all-features -- --nocapture
 
 .PHONY: clean
 clean: ## Clean build artifacts
