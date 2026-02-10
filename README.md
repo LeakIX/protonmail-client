@@ -1,14 +1,19 @@
 # protonmail-client
 
+[![CI](https://github.com/LeakIX/protonmail-client/actions/workflows/ci.yaml/badge.svg)](https://github.com/LeakIX/protonmail-client/actions/workflows/ci.yaml)
+[![crates.io](https://img.shields.io/crates/v/protonmail-client.svg)](https://crates.io/crates/protonmail-client)
+[![docs.rs](https://docs.rs/protonmail-client/badge.svg)](https://docs.rs/protonmail-client)
+
 A Rust interface to fetch emails from Proton Mail using
 [Proton Bridge](https://proton.me/mail/bridge). This is a read-only IMAP client
 that connects over STARTTLS with self-signed certificate support.
 
 The library returns parsed `Email` structs from
-[email-parser](https://github.com/LeakIX/email-parser) - it does not implement
+[email-extract](https://crates.io/crates/email-extract) - it does not implement
 its own email types.
 
-- [API Documentation](https://leakix.github.io/protonmail-client)
+- [API Documentation](https://docs.rs/protonmail-client)
+- [crates.io](https://crates.io/crates/protonmail-client)
 - [CLI usage](#cli)
 
 ## Environment variables
@@ -26,22 +31,22 @@ The crate includes a `proton-cli` binary for command-line access.
 
 ```sh
 # List recent emails
-cargo run --release --bin proton-cli -- list --limit 10
+cargo run --release --features cli --bin proton-cli -- list --limit 10
 
 # List unseen emails
-cargo run --release --bin proton-cli -- list --unseen
+cargo run --release --features cli --bin proton-cli -- list --unseen
 
 # Show a single email
-cargo run --release --bin proton-cli -- show 42
+cargo run --release --features cli --bin proton-cli -- show 42
 
 # List folders
-cargo run --release --bin proton-cli -- folders
+cargo run --release --features cli --bin proton-cli -- folders
 
 # IMAP search
-cargo run --release --bin proton-cli -- search "FROM alice@example.com"
+cargo run --release --features cli --bin proton-cli -- search "FROM alice@example.com"
 
 # JSON output (for scripting)
-cargo run --release --bin proton-cli -- list --json --limit 5
+cargo run --release --features cli --bin proton-cli -- list --json --limit 5
 ```
 
 ## MSRV
