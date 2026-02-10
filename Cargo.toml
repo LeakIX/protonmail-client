@@ -8,11 +8,7 @@ description = "IMAP client library for Proton Mail via Proton Bridge"
 repository = "https://github.com/LeakIX/protonmail-client"
 keywords = ["imap", "email", "protonmail", "proton-bridge"]
 categories = ["email", "network-programming"]
-exclude = [
-    ".github/",
-    "taplo.toml",
-    "tests/",
-]
+exclude = [".github/", "taplo.toml", "tests/"]
 
 [dependencies]
 email-extract = "0.1.0"
