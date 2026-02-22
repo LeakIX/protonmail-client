@@ -42,7 +42,7 @@ tracing-subscriber = { version = "0.3.20", features = [
 cli = ["anyhow", "clap", "tracing-subscriber"]
 
 [dev-dependencies]
-imap-codec = "2.0.0-alpha.6"
+imap-codec = "2.0.0-alpha.7"
 rcgen = "0.13"
 rustls-pemfile = "2"
 tokio = { version = "1.44", features = ["full"] }
