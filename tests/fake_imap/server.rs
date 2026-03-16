@@ -122,7 +122,7 @@ impl FakeImapServer {
             .expect("generate self-signed cert");
 
         let cert_der = cert.cert.der().clone();
-        let key_der = PrivatePkcs8KeyDer::from(cert.key_pair.serialize_der());
+        let key_der = PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der());
 
         let tls_config = rustls::ServerConfig::builder()
             .with_no_client_auth()
