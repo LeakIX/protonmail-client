@@ -14,7 +14,7 @@ exclude = [".github/", "taplo.toml", "tests/"]
 email-extract = "0.1.0"
 
 # Async runtime
-tokio = { version = "1.50", features = ["full"] }
+tokio = { version = "1.51", features = ["full"] }
 futures = "0.3"
 tokio-util = { version = "0.7", features = ["compat"] }
 
@@ -45,7 +45,7 @@ cli = ["anyhow", "clap", "tracing-subscriber"]
 imap-codec = "2.0.0-alpha.7"
 rcgen = "0.14"
 rustls-pemfile = "2"
-tokio = { version = "1.50", features = ["full"] }
+tokio = { version = "1.51", features = ["full"] }
 
 [lints.clippy]
 all = "deny"
