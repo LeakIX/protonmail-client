@@ -189,7 +189,7 @@ impl<M: Send + Sync> ProtonClient<M> {
         info!("Fetching {} most recent messages", recent_uids.len());
 
         let mut emails = Self::fetch_by_uids(&mut session, recent_uids).await?;
-        emails.sort_by(|a, b| b.date.cmp(&a.date));
+        emails.sort_by_key(|e| std::cmp::Reverse(e.date));
 
         session.logout().await.ok();
         Ok(emails)
@@ -212,9 +212,7 @@ impl<M: Send + Sync> ProtonClient<M> {
         let before_str = before.format("%-d-%b-%Y").to_string();
         let query = format!("SINCE {since_str} BEFORE {before_str}");
 
-        let mut emails = self.search(folder, &query).await?;
-        emails.sort_by(|a, b| b.date.cmp(&a.date));
-        Ok(emails)
+        self.search(folder, &query).await
     }
 
     /// Search emails using an arbitrary IMAP search query.
@@ -239,7 +237,8 @@ impl<M: Send + Sync> ProtonClient<M> {
 
         info!("Found {} messages matching '{}'", uid_list.len(), query);
 
-        let emails = Self::fetch_by_uids(&mut session, &uid_list).await?;
+        let mut emails = Self::fetch_by_uids(&mut session, &uid_list).await?;
+        emails.sort_by_key(|e| std::cmp::Reverse(e.date));
 
         session.logout().await.ok();
         Ok(emails)
